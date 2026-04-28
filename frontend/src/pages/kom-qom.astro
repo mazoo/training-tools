@@ -112,14 +112,21 @@ import Layout from "../layouts/Layout.astro";
         </div>
       </div>
 
-      <!-- Search -->
-      <div class="mb-4">
+      <!-- Search + Sort -->
+      <div class="mb-4 flex gap-3 items-center">
         <input
           id="f-search"
           type="search"
           placeholder="Search segment name…"
-          class="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+          class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
         />
+        <select
+          id="f-sort"
+          class="shrink-0 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer"
+        >
+          <option value="rank-distance">KOM / Podium / Top-10 + distance</option>
+          <option value="distance">Distance from home</option>
+        </select>
       </div>
 
       <!-- Empty / loading states -->
@@ -207,6 +214,28 @@ import Layout from "../layouts/Layout.astro";
   // ── state ─────────────────────────────────────────────────────────────────
 
   let allCandidates: any[] = [];
+  type SortMode = "rank-distance" | "distance";
+  let currentSort: SortMode = "rank-distance";
+
+  function rankGroup(c: any): number {
+    if (c.is_kom) return 0;
+    if (c.podium_seen) return 1;
+    return 2;
+  }
+
+  function sortCandidates(candidates: any[]): any[] {
+    const nullsLast = (v: number | null | undefined) => v ?? Infinity;
+    if (currentSort === "distance") {
+      return [...candidates].sort((a, b) =>
+        nullsLast(a.distance_from_home_km) - nullsLast(b.distance_from_home_km)
+      );
+    }
+    return [...candidates].sort((a, b) => {
+      const rDiff = rankGroup(a) - rankGroup(b);
+      if (rDiff !== 0) return rDiff;
+      return nullsLast(a.distance_from_home_km) - nullsLast(b.distance_from_home_km);
+    });
+  }
 
   function getFilters() {
     const komIncluded = (document.getElementById("f-kom-included") as HTMLInputElement).checked;
@@ -222,7 +251,7 @@ import Layout from "../layouts/Layout.astro";
 
   function applyFilters() {
     const f = getFilters();
-    const filtered = allCandidates.filter((c) => {
+    const filtered = sortCandidates(allCandidates).filter((c) => {
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (!f.komIncluded && c.is_kom) return false;
       if (f.ridesOnly && c.activity_type === "Run") return false;
@@ -428,6 +457,10 @@ import Layout from "../layouts/Layout.astro";
   document.getElementById("btn-backfill")?.addEventListener("click", triggerBackfill);
 
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
+  document.getElementById("f-sort")?.addEventListener("change", (e) => {
+    currentSort = (e.target as HTMLSelectElement).value as SortMode;
+    applyFilters();
+  });
 
   document.getElementById("f-kom-included")?.addEventListener("change", applyFilters);
   document.getElementById("f-rides-only")?.addEventListener("change", applyFilters);

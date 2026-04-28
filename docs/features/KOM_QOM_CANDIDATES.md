@@ -189,7 +189,11 @@ Layout:
 └──────────────────────┴──────────────────────────────────────┘
 ```
 
-The search box is rendered above the candidate list (not in the sidebar). Filtering is client-side — typing instantly narrows by segment name (case-insensitive substring match, no extra API call).
+The search box and sort dropdown are rendered side-by-side above the candidate list (not in the sidebar). Filtering and sorting are client-side — no extra API call on change.
+
+**Sort options (dropdown, top-right of list):**
+- **KOM / Podium / Top-10 + distance** (default): groups by rank tier (KOM → Podium → Top-10), then sorts by `distance_from_home_km` ASC within each tier (nulls last).
+- **Distance from home**: flat sort by `distance_from_home_km` ASC regardless of rank (nulls last).
 
 Each segment card shows:
 - Rank badge: KOM crown if `is_kom` (currently holds KOM), podium if `podium_seen`, top-10 otherwise
