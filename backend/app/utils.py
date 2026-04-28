@@ -34,7 +34,10 @@ def seconds_to_display(s: int | None) -> str | None:
 
 def is_segment_indoor(segment: dict) -> bool:
     latlng = segment.get("start_latlng") or []
-    if not latlng or (len(latlng) == 2 and latlng[0] == 0.0 and latlng[1] == 0.0):
+    if not latlng or (len(latlng) == 2 and abs(latlng[0]) < 1e-9 and abs(latlng[1]) < 1e-9):
+        return True
+    # activity_type is the most reliable signal: Strava sets it to VirtualRide for Zwift etc.
+    if segment.get("activity_type") == "VirtualRide":
         return True
     if _INDOOR_RE.search(segment.get("name", "")):
         return True

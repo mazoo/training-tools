@@ -40,14 +40,19 @@ Show the athlete a list of their starred Strava segments where they have histori
       "podium_seen": true,
       "best_seen_kom_rank": 2,
       "last_seen_kom_rank": 3,
+      "is_kom": false,
       "best_time_s": 847,
       "best_time_display": "14:07",
       "latest_time_s": 901,
       "latest_time_display": "15:01",
+      "pr_time_s": 840,
+      "pr_time_display": "14:00",
+      "pr_date": "2024-08-12T09:15:00Z",
       "times_ridden": 7,
       "best_avg_watts": 328.5,
       "latest_avg_watts": 310.2,
       "last_ridden_at": "2025-06-01T09:30:00Z",
+      "starred_date": "2023-08-06T20:42:09Z",
       "kom_time_s": 820,
       "kom_time_display": "13:40",
       "gap_to_kom_s": 27,
@@ -55,9 +60,14 @@ Show the athlete a list of their starred Strava segments where they have histori
       "gap_to_kom_pct": 3.3,
       "average_grade": 7.8,
       "distance_m": 4321,
+      "elevation_high": 1775.7,
+      "elevation_low": 728.4,
       "distance_from_home_km": 3.2,
       "is_indoor": false,
+      "activity_type": "Ride",
+      "hazardous": false,
       "city": "Villars-sur-Ollon",
+      "state": "Vaud",
       "country": "Switzerland",
       "climb_category": 3,
       "segment_url": "https://www.strava.com/segments/123456"
@@ -69,7 +79,11 @@ Show the athlete a list of their starred Strava segments where they have histori
 Notes:
 - `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if `xoms` enrichment is unavailable.
 - `gap_to_kom_pct` is `(best_time_s - kom_time_s) / kom_time_s * 100`, expressing how far off KOM the athlete is as a percentage.
+- `is_kom` reflects Strava's `athlete_pr_effort.is_kom` from the starred segment response — true if the athlete currently holds the KOM.
+- `pr_time_s` is Strava's authoritative all-time PR for the athlete; may differ from `best_time_s` if history predates our sync window.
+- `pr_time_s`, `pr_date`, `starred_date` may be `null` for segments starred before the first sync or with no recorded PR.
 - `best_avg_watts` / `latest_avg_watts` may be `null` for athletes without a power meter.
+- `elevation_high`, `elevation_low`, `state`, `activity_type`, `hazardous` may be `null` for non-starred segments without enrichment.
 - `distance_from_home_km` may be `null` if `HOME_LAT`/`HOME_LNG` are not configured or `start_latlng` is absent.
 - `last_ridden_at` is an ISO 8601 datetime string (not date-only).
 
@@ -143,14 +157,14 @@ Layout:
 The search box is rendered above the candidate list (not in the sidebar). Filtering is client-side — typing instantly narrows by segment name (case-insensitive substring match, no extra API call).
 
 Each segment card shows:
-- Rank badge: star if `best_seen_kom_rank == 1` (held KOM), podium if `podium_seen`, top-10 otherwise
+- Rank badge: KOM crown if `is_kom` (currently holds KOM), podium if `podium_seen`, top-10 otherwise
 - Segment name + Strava link
 - Distance from home (km)
-- Best time vs latest time; gap to KOM and `gap_to_kom_pct` (if available)
+- Best time vs latest time; Strava PR (`pr_time_s`) if available; gap to KOM and `gap_to_kom_pct` (if available)
 - Best watts / latest watts (if available)
 - Times ridden + last ridden date
-- Average grade + total distance
-- City/country
+- Average grade + total distance + elevation gain (`elevation_high - elevation_low`)
+- City / state / country; `hazardous` warning if flagged
 
 Filters are applied client-side — all candidates are fetched once on page load. No extra API call on filter change.
 
@@ -217,9 +231,10 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ### Indoor detection (priority order)
 
-1. `segment.start_latlng == [0.0, 0.0]` or null → indoor
-2. Segment name matches `(?i)(zwift|virtual|indoor|trainer)` → indoor
-3. Default → outdoor
+1. `segment.start_latlng` is null or `[0, 0]` → indoor
+2. `segment.activity_type == "VirtualRide"` → indoor (most reliable; set by Strava for Zwift etc.)
+3. Segment name matches `(?i)(zwift|virtual|indoor|trainer)` → indoor
+4. Default → outdoor
 
 ## Refresh strategy
 

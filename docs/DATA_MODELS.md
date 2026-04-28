@@ -69,7 +69,7 @@ One row per segment effort (attempt). This is the raw ledger of all efforts fetc
 
 ## `athlete_segment_profile` — `AthleteSegmentProfile` (`models/segment.py`)
 
-One row per (athlete, segment) pair. Aggregated performance profile, recomputed from `SegmentEffortDigest` after each sync.
+One row per (athlete, segment) pair. Aggregated performance profile, recomputed from `SegmentEffortDigest` after each sync. Athlete-specific fields from `GET /segments/starred` (PR, `is_kom`, `starred_date`) are written here on every starred-segment sync.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -79,7 +79,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 | `is_starred` | Boolean | Whether athlete has starred this segment |
 | `is_indoor` | Boolean | True if virtual/indoor (detected at ingest) |
 | `times_ridden` | Integer | Total effort count |
-| `best_time_s` | Integer? | Best elapsed time |
+| `best_time_s` | Integer? | Best elapsed time across all synced efforts |
 | `latest_time_s` | Integer? | Most recent elapsed time |
 | `best_avg_watts` | Float? | |
 | `latest_avg_watts` | Float? | |
@@ -88,13 +88,18 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 | `best_seen_kom_rank` | Integer? | Best ever KOM rank observed |
 | `last_seen_kom_rank` | Integer? | Most recent KOM rank |
 | `last_ridden_at` | DateTime? | |
+| `is_kom` | Boolean | Athlete currently holds KOM per starred response (`athlete_pr_effort.is_kom`) |
+| `pr_time_s` | Integer? | Strava's authoritative all-time PR (may predate our sync window) |
+| `pr_activity_id` | BigInteger? | Activity containing the PR |
+| `pr_date` | DateTime? | Date the PR was set |
+| `starred_date` | DateTime? | When athlete starred this segment |
 | `updated_at` | DateTime | Last recompute timestamp |
 
 ---
 
 ## `segment_enrichment` — `SegmentEnrichment` (`models/segment.py`)
 
-Segment metadata fetched from Strava and cached with a 7-day TTL. Avoids re-fetching static segment details.
+Segment metadata shared across athletes. Populated from two sources: geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL); `kom_time_s` and `cached_at` come from `GET /segments/{id}` and are refreshed on a 7-day TTL. `gap_to_kom_s` is **not stored** — computed at query time.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -105,11 +110,18 @@ Segment metadata fetched from Strava and cached with a 7-day TTL. Avoids re-fetc
 | `max_grade_pct` | Float? | |
 | `start_lat` | Float? | Used for home-distance calculation |
 | `start_lng` | Float? | |
+| `end_lat` | Float? | |
+| `end_lng` | Float? | |
 | `city` | String? | |
 | `country` | String? | |
+| `state` | String? | Region/state (e.g. "Rhône-Alpes") |
 | `climb_category` | Integer? | 0 = uncategorised, 1–5 = HC |
-| `kom_time_s` | Integer? | Current KOM time in seconds (from `xoms` field) |
-| `cached_at` | DateTime | Stale after 7 days → triggers re-fetch |
+| `elevation_high` | Float? | Absolute altitude at top of segment (m) |
+| `elevation_low` | Float? | Absolute altitude at bottom of segment (m) |
+| `activity_type` | String? | `"Ride"`, `"Run"`, `"VirtualRide"` — primary indoor signal |
+| `hazardous` | Boolean? | Strava-flagged dangerous segment |
+| `kom_time_s` | Integer? | Current KOM time in seconds (from `xoms` field); null if unavailable |
+| `cached_at` | DateTime | Tracks KOM-time freshness; stale after 7 days → triggers `GET /segments/{id}` |
 
 ---
 
@@ -164,6 +176,11 @@ erDiagram
         boolean podium_seen
         int best_seen_kom_rank
         datetime last_ridden_at
+        boolean is_kom
+        int pr_time_s
+        bigint pr_activity_id
+        datetime pr_date
+        datetime starred_date
         datetime updated_at
     }
     SegmentEnrichment {
@@ -172,6 +189,13 @@ erDiagram
         float distance_m
         float start_lat
         float start_lng
+        float end_lat
+        float end_lng
+        string state
+        float elevation_high
+        float elevation_low
+        string activity_type
+        boolean hazardous
         int kom_time_s
         datetime cached_at
     }

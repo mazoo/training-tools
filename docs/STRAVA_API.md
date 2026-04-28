@@ -184,11 +184,12 @@ Response contains new `access_token`, `refresh_token`, `expires_at`.
 
 Strava does not expose an `indoor` flag on segments directly. Inference rules (applied in priority order):
 
-1. `segment.start_latlng == [0.0, 0.0]` or null → indoor
-2. Segment name matches `(?i)(zwift|virtual|indoor|trainer)` → indoor
-3. Default → outdoor
+1. `segment.start_latlng` is null or `[0, 0]` → indoor
+2. `segment.activity_type == "VirtualRide"` → indoor (most reliable signal; set by Strava for Zwift etc.)
+3. Segment name matches `(?i)(zwift|virtual|indoor|trainer)` → indoor
+4. Default → outdoor
 
-Stored as `is_indoor` on `athlete_segment_profile`, computed once on first profile build.
+Stored as `is_indoor` on `athlete_segment_profile`. Re-evaluated on every starred-segment sync because `activity_type` is now available from `GET /segments/starred`.
 
 ## Useful headers in every response
 

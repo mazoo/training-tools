@@ -29,6 +29,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_iso(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 # ── public entry points ────────────────────────────────────────────────────────
 
 async def run_sync(
@@ -58,7 +67,7 @@ async def run_sync(
         starred = await client.get_starred_segments()
         task.strava_calls_made += 1
         starred_ids = {s["id"] for s in starred}
-        await _update_starred_flags(db, athlete_id, starred_ids)
+        await _update_starred_flags(db, athlete_id, starred)
 
         after_ts = await _compute_after_ts(db, athlete_id, full)
         activities = await _fetch_activities(client, after_ts=after_ts, task=task)
@@ -74,7 +83,7 @@ async def run_sync(
             task.status = "done"
 
         try:
-            await _fetch_kom_times(db, client, starred, task)
+            await _fetch_kom_times(db, client, athlete_id, starred, task)
         except StravaRateLimitError:
             logger.info("athlete=%d rate limited during KOM enrichment — will retry next sync", athlete_id)
 
@@ -241,7 +250,7 @@ async def _fetch_activity_details(
 
 
 async def _fetch_kom_times(
-    db: AsyncSession, client: StravaClient, starred: list[dict], task: TaskStatus
+    db: AsyncSession, client: StravaClient, athlete_id: int, starred: list[dict], task: TaskStatus
 ) -> None:
     now = _now()
     for seg in starred:
@@ -252,7 +261,7 @@ async def _fetch_kom_times(
         detail = await _fetch_segment_detail(client, segment_id, task)
         if detail is None:
             continue
-        await _save_segment_enrichment(db, segment_id, detail, existing, now)
+        await _save_segment_enrichment(db, athlete_id, segment_id, detail, existing, now)
 
 
 # ── KOM enrichment helpers ────────────────────────────────────────────────────
@@ -282,8 +291,42 @@ def _merge(new_val: object, existing_val: object) -> object:
     return new_val if new_val is not None else existing_val
 
 
+def _latlng(raw: object) -> tuple[float | None, float | None]:
+    coords = raw if isinstance(raw, list) else []
+    return (coords[0], coords[1]) if len(coords) == 2 else (None, None)
+
+
+def _build_enrichment_dict(
+    detail: dict, existing: SegmentEnrichment | None, kom_time_s: int | None, now: datetime
+) -> dict:
+    ex = existing
+    start_lat, start_lng = _latlng(detail.get("start_latlng"))
+    end_lat, end_lng = _latlng(detail.get("end_latlng"))
+    return {
+        "segment_name": detail.get("name") or (ex.segment_name if ex else "") or "",
+        "distance_m": _merge(detail.get("distance"), ex.distance_m if ex else None),
+        "avg_grade_pct": _merge(detail.get("average_grade"), ex.avg_grade_pct if ex else None),
+        "max_grade_pct": _merge(detail.get("maximum_grade"), ex.max_grade_pct if ex else None),
+        "start_lat": _merge(start_lat, ex.start_lat if ex else None),
+        "start_lng": _merge(start_lng, ex.start_lng if ex else None),
+        "end_lat": _merge(end_lat, ex.end_lat if ex else None),
+        "end_lng": _merge(end_lng, ex.end_lng if ex else None),
+        "city": _merge(detail.get("city"), ex.city if ex else None),
+        "country": _merge(detail.get("country"), ex.country if ex else None),
+        "state": _merge(detail.get("state"), ex.state if ex else None),
+        "climb_category": detail.get("climb_category"),
+        "elevation_high": _merge(detail.get("elevation_high"), ex.elevation_high if ex else None),
+        "elevation_low": _merge(detail.get("elevation_low"), ex.elevation_low if ex else None),
+        "activity_type": _merge(detail.get("activity_type"), ex.activity_type if ex else None),
+        "hazardous": detail.get("hazardous"),
+        "kom_time_s": kom_time_s,
+        "cached_at": now,
+    }
+
+
 async def _save_segment_enrichment(
     db: AsyncSession,
+    athlete_id: int,
     segment_id: int,
     detail: dict,
     existing: SegmentEnrichment | None,
@@ -291,31 +334,14 @@ async def _save_segment_enrichment(
 ) -> None:
     xoms = detail.get("xoms") or {}
     kom_time_s = xom_to_seconds(xoms.get("kom", ""))
-    latlng = detail.get("start_latlng") or []
-    start_lat = latlng[0] if len(latlng) == 2 else None
-    start_lng = latlng[1] if len(latlng) == 2 else None
     name = detail.get("name") or (existing.segment_name if existing else "") or ""
     indoor = is_segment_indoor(detail)
-
-    ex = existing  # shorter alias for the merge calls below
-    enrichment = {
-        "segment_name": name,
-        "distance_m": _merge(detail.get("distance"), ex.distance_m if ex else None),
-        "avg_grade_pct": _merge(detail.get("average_grade"), ex.avg_grade_pct if ex else None),
-        "max_grade_pct": _merge(detail.get("maximum_grade"), ex.max_grade_pct if ex else None),
-        "start_lat": _merge(start_lat, ex.start_lat if ex else None),
-        "start_lng": _merge(start_lng, ex.start_lng if ex else None),
-        "city": _merge(detail.get("city"), ex.city if ex else None),
-        "country": _merge(detail.get("country"), ex.country if ex else None),
-        "climb_category": detail.get("climb_category"),
-        "kom_time_s": kom_time_s,
-        "cached_at": now,
-    }
+    enrichment = _build_enrichment_dict(detail, existing, kom_time_s, now)
 
     await db.execute(
         sqlite_insert(AthleteSegmentProfile)
         .values(
-            athlete_id=0, segment_id=segment_id, segment_name=name,
+            athlete_id=athlete_id, segment_id=segment_id, segment_name=name,
             is_starred=True, is_indoor=indoor, times_ridden=0,
             top10_seen=False, podium_seen=False, updated_at=now,
         )
@@ -408,22 +434,81 @@ async def _advance_backfill_cursor(
 
 
 async def _update_starred_flags(
-    db: AsyncSession, athlete_id: int, starred_ids: set[int]
+    db: AsyncSession, athlete_id: int, starred: list[dict]
 ) -> None:
-    for seg_id in starred_ids:
+    """
+    Upsert starred segment data from GET /segments/starred.
+
+    Segment-level fields (geometry, grade, elevation, activity_type…) go into
+    segment_enrichment. Athlete-specific fields (PR, is_kom, starred_date) go
+    into athlete_segment_profile. cached_at and kom_time_s in segment_enrichment
+    are intentionally NOT updated here — those are managed by _fetch_kom_times.
+    """
+    now = _now()
+    for seg in starred:
+        seg_id = seg["id"]
+        name = seg.get("name", "")
+        indoor = is_segment_indoor(seg)
+
+        pr = seg.get("athlete_pr_effort") or {}
+        pr_time_s = pr.get("elapsed_time")
+        pr_activity_id = pr.get("activity_id")
+        pr_date = _parse_iso(pr.get("start_date"))
+        is_kom = bool(pr.get("is_kom", False))
+        starred_date = _parse_iso(seg.get("starred_date"))
+
+        athlete_update = {
+            "is_starred": True,
+            "is_indoor": indoor,
+            "is_kom": is_kom,
+            "pr_time_s": pr_time_s,
+            "pr_activity_id": pr_activity_id,
+            "pr_date": pr_date,
+            "starred_date": starred_date,
+        }
         await db.execute(
             sqlite_insert(AthleteSegmentProfile)
             .values(
-                athlete_id=athlete_id, segment_id=seg_id, segment_name="",
-                is_starred=True, is_indoor=False, times_ridden=0,
-                top10_seen=False, podium_seen=False, updated_at=_now(),
+                athlete_id=athlete_id, segment_id=seg_id, segment_name=name,
+                is_starred=True, is_indoor=indoor, times_ridden=0,
+                top10_seen=False, podium_seen=False, updated_at=now,
+                is_kom=is_kom, pr_time_s=pr_time_s, pr_activity_id=pr_activity_id,
+                pr_date=pr_date, starred_date=starred_date,
             )
             .on_conflict_do_update(
                 index_elements=["athlete_id", "segment_id"],
-                set_={"is_starred": True},
+                set_=athlete_update,
             )
         )
-    if starred_ids:
+
+        start_lat, start_lng = _latlng(seg.get("start_latlng"))
+        end_lat, end_lng = _latlng(seg.get("end_latlng"))
+        # Only update geometry/metadata fields — preserve cached_at and kom_time_s.
+        enrichment_update = {
+            "segment_name": name,
+            "distance_m": seg.get("distance"),
+            "avg_grade_pct": seg.get("average_grade"),
+            "max_grade_pct": seg.get("maximum_grade"),
+            "start_lat": start_lat,
+            "start_lng": start_lng,
+            "end_lat": end_lat,
+            "end_lng": end_lng,
+            "city": seg.get("city"),
+            "country": seg.get("country"),
+            "state": seg.get("state"),
+            "climb_category": seg.get("climb_category"),
+            "elevation_high": seg.get("elevation_high"),
+            "elevation_low": seg.get("elevation_low"),
+            "activity_type": seg.get("activity_type"),
+            "hazardous": seg.get("hazardous"),
+        }
+        await db.execute(
+            sqlite_insert(SegmentEnrichment)
+            .values(segment_id=seg_id, kom_time_s=None, cached_at=now, **enrichment_update)
+            .on_conflict_do_update(index_elements=["segment_id"], set_=enrichment_update)
+        )
+
+    if starred:
         await db.commit()
 
 

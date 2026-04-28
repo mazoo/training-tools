@@ -23,6 +23,20 @@ async def lifespan(app: FastAPI):
             ("athlete_profile", "home_lng", "REAL"),
             ("athlete_sync_state", "backfill_cursor_at", "DATETIME"),
             ("athlete_sync_state", "backfill_complete", "BOOLEAN DEFAULT 0"),
+            # segment_enrichment: fields from GET /segments/starred (not just IDs)
+            ("segment_enrichment", "end_lat", "REAL"),
+            ("segment_enrichment", "end_lng", "REAL"),
+            ("segment_enrichment", "state", "TEXT"),
+            ("segment_enrichment", "elevation_high", "REAL"),
+            ("segment_enrichment", "elevation_low", "REAL"),
+            ("segment_enrichment", "activity_type", "TEXT"),
+            ("segment_enrichment", "hazardous", "BOOLEAN"),
+            # athlete_segment_profile: athlete-specific data from starred response
+            ("athlete_segment_profile", "is_kom", "BOOLEAN DEFAULT 0"),
+            ("athlete_segment_profile", "pr_time_s", "INTEGER"),
+            ("athlete_segment_profile", "pr_activity_id", "INTEGER"),
+            ("athlete_segment_profile", "pr_date", "DATETIME"),
+            ("athlete_segment_profile", "starred_date", "DATETIME"),
         ]
         for table, col, col_type in migrations:
             try:

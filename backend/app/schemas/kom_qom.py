@@ -19,14 +19,21 @@ class SegmentCandidate(BaseModel):
     podium_seen: bool
     best_seen_kom_rank: int | None
     last_seen_kom_rank: int | None
+    # is_kom: athlete currently holds KOM per Strava starred response
+    is_kom: bool
     best_time_s: int | None
     best_time_display: str | None
     latest_time_s: int | None
     latest_time_display: str | None
+    # pr_time_s: Strava's authoritative all-time PR (may predate our sync window)
+    pr_time_s: int | None
+    pr_time_display: str | None
+    pr_date: datetime | None
     times_ridden: int
     best_avg_watts: float | None
     latest_avg_watts: float | None
     last_ridden_at: datetime | None
+    starred_date: datetime | None
     kom_time_s: int | None
     kom_time_display: str | None
     gap_to_kom_s: int | None
@@ -34,9 +41,14 @@ class SegmentCandidate(BaseModel):
     gap_to_kom_pct: float | None
     average_grade: float | None
     distance_m: float | None
+    elevation_high: float | None
+    elevation_low: float | None
     distance_from_home_km: float | None
     is_indoor: bool
+    activity_type: str | None
+    hazardous: bool | None
     city: str | None
+    state: str | None
     country: str | None
     climb_category: int | None
     segment_url: str

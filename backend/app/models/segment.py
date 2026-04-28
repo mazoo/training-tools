@@ -39,6 +39,12 @@ class AthleteSegmentProfile(Base):
     best_seen_kom_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen_kom_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_ridden_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Populated from athlete_pr_effort in GET /segments/starred response
+    is_kom: Mapped[bool] = mapped_column(Boolean, default=False)
+    pr_time_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pr_activity_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pr_date: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    starred_date: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -52,8 +58,15 @@ class SegmentEnrichment(Base):
     max_grade_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     start_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     start_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     city: Mapped[str | None] = mapped_column(String, nullable=True)
     country: Mapped[str | None] = mapped_column(String, nullable=True)
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
     climb_category: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    elevation_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elevation_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    activity_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    hazardous: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     kom_time_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cached_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)

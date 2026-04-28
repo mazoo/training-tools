@@ -35,7 +35,8 @@ The backend is the only component that ever calls Strava. The frontend talks onl
 
 ```
 1. Sync starred segments  (GET /athlete/segments/starred, paginated)
-   └─ store segment IDs + basic fields in athlete_segment_profile
+   └─ upsert geometry/grade/elevation/activity_type into segment_enrichment
+      upsert is_kom/pr_time_s/starred_date into athlete_segment_profile
 
 2. Sync recent activities  (GET /athlete/activities, bounded window)
    └─ for each activity: GET /activities/{id}
@@ -75,7 +76,7 @@ GET /api/kom-qom/candidates
 
 | Data | Source | Update trigger | TTL |
 |------|--------|----------------|-----|
-| Starred segments | `GET /athlete/segments/starred` | Manual refresh or bootstrap | — |
+| Starred segments (geometry, PR, is_kom) | `GET /athlete/segments/starred` | Every sync | — |
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
 | Segment enrichment | `GET /segments/{id}` | Stale after **7 days**; starred segments only | 7 days |
@@ -136,6 +137,7 @@ CREATE TABLE segment_effort_digest (
 );
 
 -- Aggregated profile per athlete+segment. Recomputed from effort_digest rows.
+-- Athlete-specific starred-segment fields (is_kom, pr_time_s, starred_date) written on every sync.
 CREATE TABLE athlete_segment_profile (
     athlete_id              INTEGER NOT NULL,
     segment_id              INTEGER NOT NULL,
@@ -152,12 +154,19 @@ CREATE TABLE athlete_segment_profile (
     best_seen_kom_rank      INTEGER,
     last_seen_kom_rank      INTEGER,
     last_ridden_at          DATETIME,
+    is_kom                  BOOLEAN DEFAULT 0,   -- currently holds KOM per Strava
+    pr_time_s               INTEGER,             -- Strava authoritative all-time PR
+    pr_activity_id          INTEGER,
+    pr_date                 DATETIME,
+    starred_date            DATETIME,
     updated_at              DATETIME NOT NULL,
     PRIMARY KEY (athlete_id, segment_id)
 );
 
--- Optional enrichment from GET /segments/{id}. Starred segments only. TTL = 7 days.
--- gap_to_kom_s is NOT stored here — it is computed at query time (best_time_s - kom_time_s).
+-- Segment metadata shared across athletes.
+-- Geometry/grade/elevation populated from GET /segments/starred on every sync (no TTL).
+-- kom_time_s and cached_at populated from GET /segments/{id}, TTL = 7 days.
+-- gap_to_kom_s is NOT stored — computed at query time as best_time_s - kom_time_s.
 CREATE TABLE segment_enrichment (
     segment_id              INTEGER PRIMARY KEY,
     segment_name            TEXT,
@@ -166,10 +175,17 @@ CREATE TABLE segment_enrichment (
     max_grade_pct           REAL,
     start_lat               REAL,
     start_lng               REAL,
+    end_lat                 REAL,
+    end_lng                 REAL,
     city                    TEXT,
     country                 TEXT,
+    state                   TEXT,
     climb_category          INTEGER,
-    kom_time_s              INTEGER,       -- parsed from xoms.kom; null if unavailable
+    elevation_high          REAL,
+    elevation_low           REAL,
+    activity_type           TEXT,           -- "Ride" / "Run" / "VirtualRide"; primary indoor signal
+    hazardous               BOOLEAN,
+    kom_time_s              INTEGER,        -- parsed from xoms.kom; null if unavailable
     cached_at               DATETIME NOT NULL
 );
 ```
