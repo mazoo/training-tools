@@ -44,7 +44,7 @@ training-tools/
 │   │   │   └── kom_qom.py     ← Pydantic response schemas for KOM/QOM feature
 │   │   ├── routers/
 │   │   │   ├── auth.py        ← Strava OAuth login/callback, /api/auth/me
-│   │   │   ├── profile.py     ← home address update, disconnect, account deletion
+│   │   │   ├── profile.py     ← home address update, token debug view, disconnect, account deletion
 │   │   │   ├── kom_qom.py     ← KOM/QOM candidates list, refresh, UI backfill, status polling
 │   │   │   └── internal.py    ← POST /api/internal/daily-backfill (cron endpoint)
 │   │   ├── services/
@@ -98,7 +98,7 @@ npm run dev                   # runs on :4321 (Astro default), proxies /api → 
 - **No direct Strava API calls outside `backend/app/strava/`**. All callers go through `StravaClient` so rate limiting is always enforced.
 - **Cache Strava responses in DB.** Segment details (including KOM time from `xoms`) are cached in `SegmentEnrichment` with a 7-day TTL. Never re-fetch if fresh data is available.
 - **Home location** defaults to env vars `HOME_LAT` / `HOME_LNG`. Athletes can override it per-account via `PUT /api/profile/home` (Nominatim geocoding stores result in `AthleteProfile`). Distance is Haversine via `utils.haversine_km`.
-- **Privileged UI actions are permission-gated.** Startup seeds the `admin` role and `backfill_from_ui` permission; the first/single connected athlete is granted `admin`.
+- **Privileged UI actions are permission-gated.** Startup seeds the `admin` role plus the `backfill_from_ui` and `strava_api_token_visible` permissions; the first/single connected athlete is granted `admin`.
 - **Feature routers** live in `backend/app/routers/`. Each feature is one file. Keep routers thin — business logic belongs in `services/`.
 - **Background tasks** use `tasks.py` for status tracking. Create with `create_task()`, update in-place, poll via a status endpoint. Tasks are in-memory only (lost on restart).
 - **Schema migrations**: there is no Alembic. New tables are created by `Base.metadata.create_all` at startup. New columns on existing tables go into the `migrations` list in `main.py` lifespan as `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`-style entries (wrapped in try/except for idempotency).

@@ -14,7 +14,8 @@ from app.models.segment import (
     SegmentEffortBackfillState,
     SegmentEffortDigest,
 )
-from app.services.auth import get_current_athlete_id
+from app.services.auth import get_current_athlete_id, get_valid_access_token
+from app.services.permissions import STRAVA_API_TOKEN_VISIBLE, require_permission
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -51,6 +52,22 @@ async def _geocode(address: str) -> tuple[float, float]:
 
 class HomeAddressUpdate(BaseModel):
     address: str
+
+
+class StravaAccessTokenResponse(BaseModel):
+    access_token: str
+
+
+@router.get(
+    "/strava-token",
+    responses={403: {"description": "Missing permission"}},
+)
+async def strava_access_token(
+    athlete_id: Annotated[int, Depends(require_permission(STRAVA_API_TOKEN_VISIBLE))],
+    db: DB,
+) -> StravaAccessTokenResponse:
+    access_token = await get_valid_access_token(athlete_id, db)
+    return StravaAccessTokenResponse(access_token=access_token)
 
 
 @router.put(

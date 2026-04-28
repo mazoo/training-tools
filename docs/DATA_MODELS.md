@@ -47,12 +47,12 @@ Local app roles used for authorization. Startup seeds `admin`.
 
 ## `permissions` — `Permission` (`models/athlete.py`)
 
-Local app permissions granted through roles. Startup seeds `backfill_from_ui`.
+Local app permissions granted through roles. Startup seeds `backfill_from_ui` and `strava_api_token_visible`, both granted to `admin`.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | Integer PK | Autoincrement |
-| `code` | String unique | Stable permission key, e.g. `backfill_from_ui` |
+| `code` | String unique | Stable permission key, e.g. `backfill_from_ui`, `strava_api_token_visible` |
 | `label` | String | Human-readable label |
 | `description` | String? | Optional detail for admin tooling |
 

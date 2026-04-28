@@ -51,6 +51,18 @@ import Layout from "../layouts/Layout.astro";
       </div>
     </section>
 
+    <!-- Strava API token debug card -->
+    <section id="strava-token-section" class="hidden bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+      <h2 class="text-base font-semibold text-white mb-4">Strava API Token</h2>
+      <div class="space-y-3">
+        <div>
+          <span class="text-xs text-gray-400 uppercase tracking-wide mb-1.5 block">Access Token</span>
+          <pre id="strava-access-token" class="min-h-10 whitespace-pre-wrap break-all rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-200">Loading…</pre>
+        </div>
+        <p id="strava-token-error" class="hidden text-sm text-red-400"></p>
+      </div>
+    </section>
+
     <!-- Home location card -->
     <section class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
       <h2 class="text-base font-semibold text-white mb-1">Home Location</h2>
@@ -136,6 +148,8 @@ import Layout from "../layouts/Layout.astro";
     });
   }
 
+  const STRAVA_API_TOKEN_VISIBLE = "strava_api_token_visible";
+
   async function init() {
     if (!token) {
       showDisconnected();
@@ -157,6 +171,7 @@ import Layout from "../layouts/Layout.astro";
     home_address?: string | null;
     home_lat?: number | null;
     home_lng?: number | null;
+    permissions?: string[];
   }) {
     const name = [data.firstname, data.lastname].filter(Boolean).join(" ") || "Athlete";
     (document.getElementById("profile-name") as HTMLElement).textContent = name;
@@ -181,6 +196,28 @@ import Layout from "../layouts/Layout.astro";
       coordsEl.textContent = `${data.home_lat.toFixed(5)}, ${data.home_lng.toFixed(5)}`;
       coordsEl.classList.remove("hidden");
     }
+
+    if (data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
+      loadStravaAccessToken();
+    }
+  }
+
+  async function loadStravaAccessToken() {
+    document.getElementById("strava-token-section")?.classList.remove("hidden");
+    const tokenEl = document.getElementById("strava-access-token") as HTMLElement;
+    const errorEl = document.getElementById("strava-token-error") as HTMLElement;
+
+    const res = await apiFetch("/api/profile/strava-token");
+    if (res.ok) {
+      const data = await res.json();
+      tokenEl.textContent = data.access_token ?? "No token returned.";
+      errorEl.classList.add("hidden");
+      return;
+    }
+
+    tokenEl.textContent = "Unavailable";
+    errorEl.textContent = "Failed to load Strava API token.";
+    errorEl.classList.remove("hidden");
   }
 
   function showDisconnected() {

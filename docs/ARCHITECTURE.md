@@ -19,7 +19,7 @@ The backend is the only component that ever calls Strava. The frontend talks onl
 
 Authentication is Strava OAuth plus a signed session token. Authorization is local: `roles`, `permissions`, `role_permissions`, and `athlete_roles` define privileged app capabilities without depending on Strava.
 
-Startup seeds an `admin` role and the `backfill_from_ui` permission, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom.
+Startup seeds an `admin` role and the `backfill_from_ui` and `strava_api_token_visible` permissions, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom. The profile-page Strava access-token debug view is protected server-side by `strava_api_token_visible`.
 
 ## Two-layer data model
 
@@ -156,7 +156,7 @@ CREATE TABLE roles (
 
 CREATE TABLE permissions (
     id           INTEGER PRIMARY KEY,
-    code         TEXT NOT NULL UNIQUE,  -- e.g. backfill_from_ui
+    code         TEXT NOT NULL UNIQUE,  -- e.g. backfill_from_ui, strava_api_token_visible
     label        TEXT NOT NULL,
     description  TEXT
 );

@@ -17,6 +17,20 @@ from app.services.auth import get_current_athlete_id
 
 ADMIN_ROLE = "admin"
 BACKFILL_FROM_UI = "backfill_from_ui"
+STRAVA_API_TOKEN_VISIBLE = "strava_api_token_visible"
+
+_ADMIN_PERMISSIONS = (
+    (
+        BACKFILL_FROM_UI,
+        "Backfill from UI",
+        "Start the starred-segment effort backfill from the browser UI.",
+    ),
+    (
+        STRAVA_API_TOKEN_VISIBLE,
+        "Strava-API token visible",
+        "View the current Strava API access token on the profile page for debugging.",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -107,29 +121,24 @@ async def _ensure_admin_role_with_permissions(db: AsyncSession) -> Role:
             set_={"label": "Admin"},
         )
     )
-    await db.execute(
-        sqlite_insert(Permission)
-        .values(
-            code=BACKFILL_FROM_UI,
-            label="Backfill from UI",
-            description="Start the starred-segment effort backfill from the browser UI.",
+    for code, label, description in _ADMIN_PERMISSIONS:
+        await db.execute(
+            sqlite_insert(Permission)
+            .values(code=code, label=label, description=description)
+            .on_conflict_do_update(
+                index_elements=["code"],
+                set_={"label": label, "description": description},
+            )
         )
-        .on_conflict_do_update(
-            index_elements=["code"],
-            set_={
-                "label": "Backfill from UI",
-                "description": "Start the starred-segment effort backfill from the browser UI.",
-            },
-        )
-    )
 
     role = await _get_role(db, ADMIN_ROLE)
-    permission = await _get_permission(db, BACKFILL_FROM_UI)
-    await db.execute(
-        sqlite_insert(RolePermission)
-        .values(role_id=role.id, permission_id=permission.id)
-        .on_conflict_do_nothing(index_elements=["role_id", "permission_id"])
-    )
+    for code, _, _ in _ADMIN_PERMISSIONS:
+        permission = await _get_permission(db, code)
+        await db.execute(
+            sqlite_insert(RolePermission)
+            .values(role_id=role.id, permission_id=permission.id)
+            .on_conflict_do_nothing(index_elements=["role_id", "permission_id"])
+        )
     return role
 
 

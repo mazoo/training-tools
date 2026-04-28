@@ -36,7 +36,7 @@ client = StravaClient(access_token)
 
 ## Permission pattern
 
-Roles and permissions live in `models/athlete.py`, with helpers in `services/permissions.py`. Startup seeds the built-in `admin` role, the `backfill_from_ui` permission, and grants `admin` to the only connected athlete when no role assignments exist yet.
+Roles and permissions live in `models/athlete.py`, with helpers in `services/permissions.py`. Startup seeds the built-in `admin` role, the `backfill_from_ui` and `strava_api_token_visible` permissions, and grants `admin` to the only connected athlete when no role assignments exist yet.
 
 Use `athlete_has_permission(db, athlete_id, BACKFILL_FROM_UI)` when an endpoint needs to report availability without failing. Use `Depends(require_permission(BACKFILL_FROM_UI))` when the endpoint itself must be blocked with `403 Missing permission`.
 
