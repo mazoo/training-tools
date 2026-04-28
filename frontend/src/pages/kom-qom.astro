@@ -91,6 +91,16 @@ import Layout from "../layouts/Layout.astro";
         </div>
       </div>
 
+      <!-- Search -->
+      <div class="mb-4">
+        <input
+          id="f-search"
+          type="search"
+          placeholder="Search segment name…"
+          class="w-full bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+        />
+      </div>
+
       <!-- Empty / loading states -->
       <div id="state-loading" class="text-gray-500 text-sm py-8 text-center">Loading…</div>
       <div id="state-empty" class="hidden text-gray-500 text-sm py-8 text-center">
@@ -181,12 +191,14 @@ import Layout from "../layouts/Layout.astro";
     const gradMin = (document.getElementById("f-grad-min") as HTMLInputElement).value;
     const gradMax = (document.getElementById("f-grad-max") as HTMLInputElement).value;
     const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
-    return { podium, timeMin, timeMax, gradMin, gradMax, surface };
+    const search = (document.getElementById("f-search") as HTMLInputElement).value.trim().toLowerCase();
+    return { podium, timeMin, timeMax, gradMin, gradMax, surface, search };
   }
 
   function applyFilters() {
     const f = getFilters();
     const filtered = allCandidates.filter((c) => {
+      if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (f.podium && !c.podium_seen) return false;
       if (f.timeMin && c.best_time_s != null && c.best_time_s < Number(f.timeMin) * 60) return false;
       if (f.timeMax && c.best_time_s != null && c.best_time_s > Number(f.timeMax) * 60) return false;
@@ -295,6 +307,8 @@ import Layout from "../layouts/Layout.astro";
   // ── wire up ───────────────────────────────────────────────────────────────
 
   document.getElementById("btn-refresh")?.addEventListener("click", triggerRefresh);
+
+  document.getElementById("f-search")?.addEventListener("input", applyFilters);
 
   ["f-podium", "f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", applyFilters);

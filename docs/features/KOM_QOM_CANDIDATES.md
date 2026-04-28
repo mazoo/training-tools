@@ -125,20 +125,22 @@ Layout:
 ┌─────────────────────────────────────────────────────────────┐
 │  KOM / QOM Candidates                        [Refresh data] │
 ├──────────────────────┬──────────────────────────────────────┤
-│  FILTERS             │  SEGMENT LIST (sorted by dist.)      │
+│  FILTERS             │  [ Search segment name…            ] │
+│                      ├──────────────────────────────────────┤
+│  □ Podium only       │  SEGMENT LIST (sorted by dist.)      │
 │                      │                                      │
-│  □ Podium only       │  Col de la Croix              3.2km │
-│                      │      Best 14:07 · Last 15:01         │
-│  Effort time         │      Rank: #2 seen · 328W · 7×      │
-│  [   ] – [   ] min   │      Gap to KOM: 0:27 ·  +7.8%      │
-│                      │                                      │
-│  Gradient            │  Kleine Scheidegg             5.1km │
-│  [   ] – [   ] %     │      ...                            │
-│                      │                                      │
-│  Surface             │  ...                                 │
+│  Effort time         │  Col de la Croix              3.2km │
+│  [   ] – [   ] min   │      Best 14:07 · Last 15:01         │
+│                      │      Rank: #2 seen · 328W · 7×      │
+│  Gradient            │      Gap to KOM: 0:27 ·  +7.8%      │
+│  [   ] – [   ] %     │                                      │
+│                      │  Kleine Scheidegg             5.1km │
+│  Surface             │      ...                            │
 │  ○ All  ○ Out  ○ In  │                                      │
 └──────────────────────┴──────────────────────────────────────┘
 ```
+
+The search box is rendered above the candidate list (not in the sidebar). Filtering is client-side — typing instantly narrows by segment name (case-insensitive substring match, no extra API call).
 
 Each segment card shows:
 - Rank badge: star if `best_seen_kom_rank == 1` (held KOM), podium if `podium_seen`, top-10 otherwise
