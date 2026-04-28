@@ -17,6 +17,15 @@ import Layout from "../layouts/Layout.astro";
         </span>
       </label>
 
+      <label class="flex items-center justify-between cursor-pointer">
+        <span class="text-sm text-gray-300">Rides only</span>
+        <span class="relative inline-flex items-center">
+          <input id="f-rides-only" type="checkbox" class="sr-only peer" checked />
+          <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+          <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+        </span>
+      </label>
+
       <div>
         <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Effort time (min)</p>
         <div class="flex items-center gap-2">
@@ -126,7 +135,7 @@ import Layout from "../layouts/Layout.astro";
       </div>
 
       <!-- Candidate list -->
-      <div id="candidate-list" class="hidden grid gap-3"></div>
+      <div id="candidate-list" class="hidden space-y-3"></div>
     </div>
   </div>
 </Layout>
@@ -201,13 +210,14 @@ import Layout from "../layouts/Layout.astro";
 
   function getFilters() {
     const komIncluded = (document.getElementById("f-kom-included") as HTMLInputElement).checked;
+    const ridesOnly = (document.getElementById("f-rides-only") as HTMLInputElement).checked;
     const timeMin = (document.getElementById("f-time-min") as HTMLInputElement).value;
     const timeMax = (document.getElementById("f-time-max") as HTMLInputElement).value;
     const gradMin = (document.getElementById("f-grad-min") as HTMLInputElement).value;
     const gradMax = (document.getElementById("f-grad-max") as HTMLInputElement).value;
     const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
     const search = (document.getElementById("f-search") as HTMLInputElement).value.trim().toLowerCase();
-    return { komIncluded, timeMin, timeMax, gradMin, gradMax, surface, search };
+    return { komIncluded, ridesOnly, timeMin, timeMax, gradMin, gradMax, surface, search };
   }
 
   function applyFilters() {
@@ -215,6 +225,7 @@ import Layout from "../layouts/Layout.astro";
     const filtered = allCandidates.filter((c) => {
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (!f.komIncluded && c.is_kom) return false;
+      if (f.ridesOnly && c.activity_type === "Run") return false;
       if (f.timeMin && c.best_time_s != null && c.best_time_s < Number(f.timeMin) * 60) return false;
       if (f.timeMax && c.best_time_s != null && c.best_time_s > Number(f.timeMax) * 60) return false;
       if (f.gradMin && c.average_grade != null && c.average_grade < Number(f.gradMin)) return false;
@@ -419,6 +430,7 @@ import Layout from "../layouts/Layout.astro";
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
 
   document.getElementById("f-kom-included")?.addEventListener("change", applyFilters);
+  document.getElementById("f-rides-only")?.addEventListener("change", applyFilters);
   ["f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", applyFilters);
   });

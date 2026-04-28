@@ -7,7 +7,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 ## User stories
 
 - As an athlete, I want to see which of my starred segments I have ever been in the top 10 or on the podium for, so I can prioritise realistic KOM/QOM targets.
-- As an athlete, I want to filter by effort time, gradient, indoor/outdoor, and podium-only, so I can match segments to a specific workout goal.
+- As an athlete, I want to filter by effort time, gradient, surface, activity type (rides vs runs), and whether I already hold the KOM, so I can match segments to a specific workout goal.
 - As an athlete, I want to see how many times I've ridden a segment and what average watts I've put out, so I can gauge my current form.
 - As an athlete, I want KOM segments surfaced first, then the rest sorted by distance from home, so I can see what I already hold and plan local efforts next.
 - As an admin, I want to start the historical backfill from the page when Strava budget is safe, so I can fill missing segment-effort history without using the cron endpoint manually.
@@ -25,7 +25,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 | `gradient_min` | float (%) | — | Minimum average gradient |
 | `gradient_max` | float (%) | — | Maximum average gradient |
 | `surface` | `outdoor` \| `indoor` \| `all` | `all` | Filter by environment |
-| `podium_only` | boolean | `false` | If true, return only segments where `podium_seen = true` |
+| `podium_only` | boolean | `false` | If true, return only segments where `podium_seen = true` (backend supported; not currently exposed in the UI — to be re-added once data is verified) |
 
 #### Response `200 OK`
 
@@ -172,15 +172,16 @@ Layout:
 ├──────────────────────┬──────────────────────────────────────┤
 │  FILTERS             │  [ Search segment name…            ] │
 │                      ├──────────────────────────────────────┤
-│  □ Podium only       │  SEGMENT LIST (KOMs first, then dist)│
-│                      │                                      │
-│  Effort time         │  Col de la Croix              3.2km │
-│  [   ] – [   ] min   │      Best 14:07 · Last 15:01         │
-│                      │      Rank: #2 seen · 328W · 7×      │
-│  Gradient            │      Gap to KOM: 0:27 ·  +7.8%      │
-│  [   ] – [   ] %     │                                      │
-│                      │  Kleine Scheidegg             5.1km │
-│  Surface             │      ...                            │
+│  KOM/QOM included ●  │  SEGMENT LIST (KOMs first, then dist)│
+│  Rides only       ●  │                                      │
+│                      │  Col de la Croix              3.2km │
+│  Effort time         │      Best 14:07 · Last 15:01         │
+│  [   ] – [   ] min   │      Rank: #2 seen · 328W · 7×      │
+│                      │      Gap to KOM: 0:27 ·  +7.8%      │
+│  Gradient            │                                      │
+│  [   ] – [   ] %     │  Kleine Scheidegg             5.1km │
+│                      │      ...                            │
+│  Surface             │                                      │
 │  ○ All  ○ Out  ○ In  │                                      │
 │                      │                                      │
 │  [Run daily backfill]│  visible only with permission +      │
