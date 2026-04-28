@@ -7,7 +7,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.athlete import AthleteToken, AthleteSyncState
-from app.models.segment import AthleteSegmentProfile, SegmentEffortDigest, SegmentEnrichment
+from app.models.segment import (
+    AthleteSegmentProfile,
+    SegmentEffortBackfillState,
+    SegmentEffortDigest,
+    SegmentEnrichment,
+)
 from app.strava.client import StravaClient, StravaRateLimitError
 from app.strava.rate_limiter import rate_limiter
 from app.tasks import TaskStatus, create_task
@@ -16,13 +21,14 @@ from app.utils import is_segment_indoor, xom_to_seconds
 logger = logging.getLogger(__name__)
 
 _INITIAL_DAYS = 30          # days fetched on first connect (fast path)
-_BACKFILL_CHUNK_DAYS = 30   # days extended backward per daily backfill run
 _BACKFILL_TOTAL_DAYS = 365  # how far back to go in total
 _MAX_PAGES = 5
 _KOM_TIME_TTL_DAYS = 7
+_SEGMENT_EFFORTS_PER_PAGE = 200
+_MIN_SEGMENT_EFFORT_WINDOW = timedelta(hours=1)
 # Stop a backfill run if fewer than this many daily calls remain — leaves
 # headroom for ongoing syncs and starred-segment enrichment.
-_MIN_DAILY_BUDGET = 150
+MIN_DAILY_BACKFILL_BUDGET = 150
 
 
 def _now() -> datetime:
@@ -104,7 +110,13 @@ async def run_backfill_chunk(
     task: TaskStatus,
 ) -> None:
     """
-    Extend this athlete's history one chunk further back.
+    Extend this athlete's starred-segment effort history.
+
+    The historical path is segment-centric: one broad segment_efforts request per
+    starred segment usually returns every effort in the configured lookback
+    window. If a window returns exactly the page cap, it is split and retried in
+    smaller windows so dense segments do not silently truncate.
+
     Called by run_daily_backfill; also callable directly for testing.
     No-ops if initial sync hasn't run yet or backfill is already complete.
     """
@@ -117,31 +129,45 @@ async def run_backfill_chunk(
         client = StravaClient(access_token)
         task.status = "running"
 
-        cursor = sync_state.backfill_cursor_at or (_now() - timedelta(days=_INITIAL_DAYS))
-        before_ts = int(cursor.timestamp())
-        chunk_start = cursor - timedelta(days=_BACKFILL_CHUNK_DAYS)
-        oldest_allowed = _now() - timedelta(days=_BACKFILL_TOTAL_DAYS)
-        complete_after_this = chunk_start <= oldest_allowed
-        if complete_after_this:
-            chunk_start = oldest_allowed
-        after_ts = int(chunk_start.timestamp())
+        window_end = _now()
+        window_start = window_end - timedelta(days=_BACKFILL_TOTAL_DAYS)
+        starred_ids = await _get_starred_ids(db, athlete_id)
+        segment_ids = await _get_pending_segment_effort_backfill_ids(db, athlete_id)
+        task.activities_total = len(segment_ids)
+
+        if not segment_ids:
+            await _mark_backfill_complete(db, athlete_id, window_start)
+            task.status = "done"
+            return
 
         logger.info(
-            "athlete=%d backfill chunk: %s → %s (complete_after=%s)",
-            athlete_id, chunk_start.date(), cursor.date(), complete_after_this,
+            "athlete=%d segment-effort backfill: %d starred segments, %s → %s",
+            athlete_id, len(segment_ids), window_start.date(), window_end.date(),
         )
 
-        activities = await _fetch_activities(
-            client, after_ts=after_ts, before_ts=before_ts, task=task
-        )
-        task.activities_total = len(activities)
+        for i, segment_id in enumerate(segment_ids):
+            try:
+                await _mark_segment_effort_backfill_attempt(db, athlete_id, segment_id)
+                touched = await _fetch_segment_effort_window(
+                    db, client, athlete_id, segment_id, window_start, window_end, task
+                )
+                for touched_segment_id in touched:
+                    await _recompute_profile(db, athlete_id, touched_segment_id, starred_ids)
+                await _mark_segment_effort_backfill_done(db, athlete_id, segment_id)
+            except StravaRateLimitError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "athlete=%d failed segment-effort backfill for segment=%d",
+                    athlete_id, segment_id,
+                )
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code in {400, 403, 404}:
+                    await _mark_segment_effort_backfill_skipped(db, athlete_id, segment_id, str(exc))
+            task.activities_processed = i + 1
 
-        starred_ids = await _get_starred_ids(db, athlete_id)
-        touched = await _fetch_activity_details(db, client, athlete_id, activities, task)
-        for segment_id in touched:
-            await _recompute_profile(db, athlete_id, segment_id, starred_ids)
-
-        await _advance_backfill_cursor(db, athlete_id, chunk_start, complete_after_this)
+        if not await _get_pending_segment_effort_backfill_ids(db, athlete_id):
+            await _mark_backfill_complete(db, athlete_id, window_start)
         task.status = "done"
 
     except StravaRateLimitError as exc:
@@ -160,7 +186,7 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
     Designed to be called once per day by the cron endpoint.
 
     Multi-user budget safety: athletes are processed one at a time. If the
-    shared daily budget drops below _MIN_DAILY_BUDGET, remaining athletes are
+    shared daily budget drops below MIN_DAILY_BACKFILL_BUDGET, remaining athletes are
     skipped and will be retried the next day.
     """
     from app.services.auth import get_valid_access_token
@@ -178,7 +204,7 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
             outcomes[athlete_id] = "skipped"
             continue
 
-        if rate_limiter.remaining_daily < _MIN_DAILY_BUDGET:
+        if rate_limiter.remaining_daily < MIN_DAILY_BACKFILL_BUDGET:
             logger.warning("daily budget low (%d remaining) — stopping backfill", rate_limiter.remaining_daily)
             for row in all_tokens:
                 if row.athlete_id not in outcomes:
@@ -246,6 +272,53 @@ async def _fetch_activity_details(
         except Exception:
             logger.warning("athlete=%d failed to process activity=%d", athlete_id, activity["id"])
         task.activities_processed = i + 1
+    return touched
+
+
+def _strava_local_datetime(dt: datetime) -> str:
+    return dt.isoformat()
+
+
+async def _fetch_segment_effort_window(
+    db: AsyncSession,
+    client: StravaClient,
+    athlete_id: int,
+    segment_id: int,
+    window_start: datetime,
+    window_end: datetime,
+    task: TaskStatus,
+) -> set[int]:
+    efforts = await client.get_segment_efforts(
+        segment_id=segment_id,
+        start_date_local=_strava_local_datetime(window_start),
+        end_date_local=_strava_local_datetime(window_end),
+        per_page=_SEGMENT_EFFORTS_PER_PAGE,
+    )
+    task.strava_calls_made += 1
+    touched = await _process_segment_efforts(db, athlete_id, efforts)
+
+    if len(efforts) < _SEGMENT_EFFORTS_PER_PAGE:
+        return touched
+
+    window_size = window_end - window_start
+    if window_size <= _MIN_SEGMENT_EFFORT_WINDOW:
+        logger.warning(
+            "segment=%d returned the segment_efforts cap inside a %s window; result may be truncated",
+            segment_id, window_size,
+        )
+        return touched
+
+    midpoint = window_start + (window_size / 2)
+    touched.update(
+        await _fetch_segment_effort_window(
+            db, client, athlete_id, segment_id, window_start, midpoint, task
+        )
+    )
+    touched.update(
+        await _fetch_segment_effort_window(
+            db, client, athlete_id, segment_id, midpoint, window_end, task
+        )
+    )
     return touched
 
 
@@ -384,6 +457,125 @@ async def _get_starred_ids(db: AsyncSession, athlete_id: int) -> set[int]:
     return {row[0] for row in result.all()}
 
 
+async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
+    profiles_result = await db.execute(
+        select(AthleteSegmentProfile).where(
+            AthleteSegmentProfile.athlete_id == athlete_id,
+            AthleteSegmentProfile.is_starred.is_(True),
+        )
+    )
+    profiles = profiles_result.scalars().all()
+
+    finished_result = await db.execute(
+        select(SegmentEffortBackfillState.segment_id).where(
+            SegmentEffortBackfillState.athlete_id == athlete_id,
+            SegmentEffortBackfillState.status.in_(["done", "skipped"]),
+        )
+    )
+    finished = {row[0] for row in finished_result.all()}
+    pending = [profile for profile in profiles if profile.segment_id not in finished]
+
+    pending.sort(
+        key=lambda profile: (
+            1 if profile.is_indoor else 0,
+            1 if profile.pr_time_s is None else 0,
+            profile.segment_name.lower(),
+            profile.segment_id,
+        )
+    )
+    return [profile.segment_id for profile in pending]
+
+
+async def _mark_segment_effort_backfill_attempt(
+    db: AsyncSession, athlete_id: int, segment_id: int
+) -> None:
+    now = _now()
+    stmt = (
+        sqlite_insert(SegmentEffortBackfillState)
+        .values(
+            athlete_id=athlete_id,
+            segment_id=segment_id,
+            status="pending",
+            completed_at=None,
+            last_attempt_at=now,
+            last_error=None,
+        )
+        .on_conflict_do_update(
+            index_elements=["athlete_id", "segment_id"],
+            set_={"status": "pending", "last_attempt_at": now, "last_error": None},
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _mark_segment_effort_backfill_done(
+    db: AsyncSession, athlete_id: int, segment_id: int
+) -> None:
+    now = _now()
+    stmt = (
+        sqlite_insert(SegmentEffortBackfillState)
+        .values(
+            athlete_id=athlete_id,
+            segment_id=segment_id,
+            status="done",
+            completed_at=now,
+            last_attempt_at=now,
+            last_error=None,
+        )
+        .on_conflict_do_update(
+            index_elements=["athlete_id", "segment_id"],
+            set_={
+                "status": "done",
+                "completed_at": now,
+                "last_attempt_at": now,
+                "last_error": None,
+            },
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _mark_segment_effort_backfill_skipped(
+    db: AsyncSession, athlete_id: int, segment_id: int, error: str
+) -> None:
+    now = _now()
+    stmt = (
+        sqlite_insert(SegmentEffortBackfillState)
+        .values(
+            athlete_id=athlete_id,
+            segment_id=segment_id,
+            status="skipped",
+            completed_at=now,
+            last_attempt_at=now,
+            last_error=error[:500],
+        )
+        .on_conflict_do_update(
+            index_elements=["athlete_id", "segment_id"],
+            set_={
+                "status": "skipped",
+                "completed_at": now,
+                "last_attempt_at": now,
+                "last_error": error[:500],
+            },
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _mark_backfill_complete(
+    db: AsyncSession, athlete_id: int, backfilled_to: datetime
+) -> None:
+    await db.execute(
+        update(AthleteSyncState)
+        .where(AthleteSyncState.athlete_id == athlete_id)
+        .values(backfill_cursor_at=backfilled_to, backfill_complete=True)
+    )
+    await db.commit()
+
+
 async def _upsert_sync_state(
     db: AsyncSession,
     athlete_id: int,
@@ -399,6 +591,9 @@ async def _upsert_sync_state(
         "bootstrap_done": True,
         "last_activity_sync_at": now,
         "last_star_sync_at": now,
+        # A starred-segment sync may have discovered newly starred segments.
+        # The next daily backfill will mark complete again if nothing is pending.
+        "backfill_complete": False,
     }
     if is_first_sync:
         update_set["backfill_cursor_at"] = initial_cursor
@@ -416,20 +611,6 @@ async def _upsert_sync_state(
         .on_conflict_do_update(index_elements=["athlete_id"], set_=update_set)
     )
     await db.execute(stmt)
-    await db.commit()
-
-
-async def _advance_backfill_cursor(
-    db: AsyncSession,
-    athlete_id: int,
-    new_cursor: datetime,
-    complete: bool,
-) -> None:
-    await db.execute(
-        update(AthleteSyncState)
-        .where(AthleteSyncState.athlete_id == athlete_id)
-        .values(backfill_cursor_at=new_cursor, backfill_complete=complete)
-    )
     await db.commit()
 
 
@@ -538,12 +719,46 @@ async def _process_activity(
     return touched
 
 
-def _parse_effort_date(activity: dict) -> date:
-    raw = activity.get("start_date_local", activity.get("start_date", ""))[:10]
+async def _process_segment_efforts(
+    db: AsyncSession, athlete_id: int, efforts: list[dict]
+) -> set[int]:
+    """
+    Store DetailedSegmentEffort rows returned by GET /segment_efforts.
+    """
+    touched: set[int] = set()
+
+    for effort in efforts:
+        seg = effort.get("segment") or {}
+        segment_id = seg.get("id")
+        activity = effort.get("activity") or {}
+        activity_id = activity.get("id")
+        if not segment_id or not activity_id:
+            continue
+
+        effort_date = _parse_segment_effort_date(effort)
+        await _upsert_effort_digest(db, effort, athlete_id, segment_id, activity_id, effort_date)
+        await _upsert_enrichment_from_effort(db, seg, segment_id)
+        await _upsert_profile_name(db, athlete_id, seg, segment_id)
+        touched.add(segment_id)
+
+    await db.commit()
+    return touched
+
+
+def _parse_date(raw: str | None) -> date:
+    raw_date = (raw or "")[:10]
     try:
-        return date.fromisoformat(raw)
+        return date.fromisoformat(raw_date)
     except ValueError:
         return date.today()
+
+
+def _parse_effort_date(activity: dict) -> date:
+    return _parse_date(activity.get("start_date_local") or activity.get("start_date"))
+
+
+def _parse_segment_effort_date(effort: dict) -> date:
+    return _parse_date(effort.get("start_date_local") or effort.get("start_date"))
 
 
 async def _upsert_effort_digest(

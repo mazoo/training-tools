@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -34,7 +34,47 @@ class AthleteSyncState(Base):
     bootstrap_done: Mapped[bool] = mapped_column(Boolean, default=False)
     last_activity_sync_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     last_star_sync_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
-    # Oldest activity timestamp already fetched; None = initial sync not yet done.
-    # Daily backfill extends this backward by _BACKFILL_CHUNK_DAYS each run.
+    # Oldest timestamp covered by historical backfill; None = initial sync not yet done.
+    # Segment-effort backfill marks per-segment progress separately.
     backfill_cursor_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     backfill_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+
+    role_id: Mapped[int] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    permission_id: Mapped[int] = mapped_column(
+        ForeignKey("permissions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class AthleteRole(Base):
+    __tablename__ = "athlete_roles"
+
+    athlete_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role_id: Mapped[int] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )

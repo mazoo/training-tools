@@ -6,8 +6,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_HEADROOM_15MIN = 20
-_HEADROOM_DAILY = 100
+HEADROOM_15MIN = 20
+HEADROOM_DAILY = 100
 _WINDOW_15MIN_S = 900
 _WINDOW_DAILY_S = 86400
 
@@ -33,19 +33,11 @@ class StravaRateLimiter:
     async def acquire(self) -> None:
         """Reserve one slot, or raise BudgetExhausted when headroom is gone."""
         async with self._lock:
-            now = time.monotonic()
-            if now >= self._reset_15min_at:
-                self._remaining_15min = 200
-                self._reset_15min_at = now + _WINDOW_15MIN_S
-                logger.debug("15-min rate limit window reset")
-            if now >= self._reset_daily_at:
-                self._remaining_daily = 2000
-                self._reset_daily_at = now + _WINDOW_DAILY_S
-                logger.debug("daily rate limit window reset")
+            self._refresh_windows()
 
-            if self._remaining_15min <= _HEADROOM_15MIN:
+            if self._remaining_15min <= HEADROOM_15MIN:
                 raise BudgetExhausted(f"15-min headroom exhausted ({self._remaining_15min} remaining)")
-            if self._remaining_daily <= _HEADROOM_DAILY:
+            if self._remaining_daily <= HEADROOM_DAILY:
                 raise BudgetExhausted(f"daily headroom exhausted ({self._remaining_daily} remaining)")
 
             self._remaining_15min -= 1
@@ -71,15 +63,38 @@ class StravaRateLimiter:
             pass
 
     def seconds_until_15min_reset(self) -> float:
+        self._refresh_windows()
         return max(0.0, self._reset_15min_at - time.monotonic())
+
+    def seconds_until_daily_reset(self) -> float:
+        self._refresh_windows()
+        return max(0.0, self._reset_daily_at - time.monotonic())
 
     @property
     def remaining_15min(self) -> int:
+        self._refresh_windows()
         return self._remaining_15min
 
     @property
     def remaining_daily(self) -> int:
+        self._refresh_windows()
         return self._remaining_daily
+
+    def _refresh_windows(self) -> None:
+        now = time.monotonic()
+        changed = False
+        if now >= self._reset_15min_at:
+            self._remaining_15min = 200
+            self._reset_15min_at = now + _WINDOW_15MIN_S
+            changed = True
+            logger.debug("15-min rate limit window reset")
+        if now >= self._reset_daily_at:
+            self._remaining_daily = 2000
+            self._reset_daily_at = now + _WINDOW_DAILY_S
+            changed = True
+            logger.debug("daily rate limit window reset")
+        if changed:
+            self._save_state()
 
     # ── persistence ───────────────────────────────────────────────────────────
 

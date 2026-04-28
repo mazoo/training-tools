@@ -8,8 +8,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.athlete import AthleteProfile, AthleteSyncState, AthleteToken
-from app.models.segment import AthleteSegmentProfile, SegmentEffortDigest
+from app.models.athlete import AthleteProfile, AthleteRole, AthleteSyncState, AthleteToken
+from app.models.segment import (
+    AthleteSegmentProfile,
+    SegmentEffortBackfillState,
+    SegmentEffortDigest,
+)
 from app.services.auth import get_current_athlete_id
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
@@ -89,7 +93,15 @@ async def disconnect(athlete_id: CurrentAthlete, db: DB) -> dict:
 async def delete_account(athlete_id: CurrentAthlete, db: DB) -> dict:
     # Deletes all rows belonging to this athlete. SegmentEnrichment is intentionally
     # excluded — it has no athlete_id and its data (geometry, KOM times) is shared.
-    for model in (AthleteToken, AthleteSyncState, AthleteProfile, AthleteSegmentProfile, SegmentEffortDigest):
+    for model in (
+        AthleteToken,
+        AthleteSyncState,
+        AthleteProfile,
+        AthleteRole,
+        AthleteSegmentProfile,
+        SegmentEffortDigest,
+        SegmentEffortBackfillState,
+    ):
         await db.execute(delete(model).where(model.athlete_id == athlete_id))
     await db.commit()
     return {"deleted": True}

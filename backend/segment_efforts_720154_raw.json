@@ -1,0 +1,489 @@
+[
+  {
+    "id": 2979438095337199994,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 7419766464,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 431,
+    "moving_time": 431,
+    "start_date": "2022-07-05T15:32:49Z",
+    "start_date_local": "2022-07-05T17:32:49Z",
+    "distance": 2123.63,
+    "start_index": 1860,
+    "end_index": 2291,
+    "average_cadence": 70.2,
+    "device_watts": true,
+    "average_watts": 327.2,
+    "average_heartrate": 151.1,
+    "max_heartrate": 161.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": 1,
+    "achievements": [
+      {
+        "type_id": 3,
+        "type": "pr",
+        "rank": 1
+      }
+    ],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3344760999261640332,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 14119763558,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 451,
+    "moving_time": 444,
+    "start_date": "2025-04-08T17:48:36Z",
+    "start_date_local": "2025-04-08T19:48:36Z",
+    "distance": 2123.63,
+    "start_index": 5977,
+    "end_index": 6426,
+    "device_watts": true,
+    "average_watts": 320.4,
+    "average_heartrate": 146.0,
+    "max_heartrate": 158.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": 2,
+    "achievements": [
+      {
+        "type_id": 3,
+        "type": "pr",
+        "rank": 2
+      }
+    ],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3468281989186088476,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 17732928568,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 457,
+    "moving_time": 457,
+    "start_date": "2026-03-15T14:18:37Z",
+    "start_date_local": "2026-03-15T15:18:37Z",
+    "distance": 2123.63,
+    "start_index": 4429,
+    "end_index": 4886,
+    "average_cadence": 84.6,
+    "device_watts": true,
+    "average_watts": 330.9,
+    "average_heartrate": 139.6,
+    "max_heartrate": 147.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": 3,
+    "achievements": [
+      {
+        "type_id": 3,
+        "type": "pr",
+        "rank": 3
+      }
+    ],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3365069024854423076,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 14687000689,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 506,
+    "moving_time": 506,
+    "start_date": "2025-06-03T18:53:01Z",
+    "start_date_local": "2025-06-03T20:53:01Z",
+    "distance": 2123.63,
+    "start_index": 9538,
+    "end_index": 10044,
+    "average_cadence": 83.2,
+    "device_watts": true,
+    "average_watts": 282.5,
+    "average_heartrate": 152.6,
+    "max_heartrate": 162.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": 3,
+    "achievements": [
+      {
+        "type_id": 3,
+        "type": "pr",
+        "rank": 3
+      }
+    ],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 2963020366557671708,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 7177375974,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 520,
+    "moving_time": 520,
+    "start_date": "2022-05-21T08:04:26Z",
+    "start_date_local": "2022-05-21T10:04:26Z",
+    "distance": 2123.63,
+    "start_index": 1945,
+    "end_index": 2465,
+    "average_cadence": 73.1,
+    "device_watts": true,
+    "average_watts": 235.0,
+    "average_heartrate": 144.5,
+    "max_heartrate": 150.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": null,
+    "achievements": [],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3364264105774479412,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 14663269445,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 525,
+    "moving_time": 525,
+    "start_date": "2025-06-01T11:14:43Z",
+    "start_date_local": "2025-06-01T13:14:43Z",
+    "distance": 2123.63,
+    "start_index": 3205,
+    "end_index": 3730,
+    "average_cadence": 83.7,
+    "device_watts": true,
+    "average_watts": 276.2,
+    "average_heartrate": 149.8,
+    "max_heartrate": 156.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": null,
+    "achievements": [],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3462513112772813672,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 17543448682,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 607,
+    "moving_time": 607,
+    "start_date": "2026-02-27T15:28:49Z",
+    "start_date_local": "2026-02-27T16:28:49Z",
+    "distance": 2123.63,
+    "start_index": 4907,
+    "end_index": 5514,
+    "average_cadence": 84.1,
+    "device_watts": true,
+    "average_watts": 234.4,
+    "average_heartrate": 150.2,
+    "max_heartrate": 159.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": null,
+    "achievements": [],
+    "visibility": "everyone",
+    "kom_rank": null
+  },
+  {
+    "id": 3370131759577943256,
+    "resource_state": 2,
+    "name": "Aetigkofen",
+    "activity": {
+      "id": 14831216661,
+      "visibility": "everyone",
+      "resource_state": 1
+    },
+    "athlete": {
+      "id": 62899266,
+      "resource_state": 1
+    },
+    "elapsed_time": 668,
+    "moving_time": 668,
+    "start_date": "2025-06-17T18:11:30Z",
+    "start_date_local": "2025-06-17T20:11:30Z",
+    "distance": 2123.63,
+    "start_index": 7440,
+    "end_index": 8108,
+    "average_cadence": 81.0,
+    "device_watts": true,
+    "average_watts": 204.8,
+    "average_heartrate": 125.4,
+    "max_heartrate": 129.0,
+    "segment": {
+      "id": 720154,
+      "resource_state": 2,
+      "name": "Aetigkofen",
+      "activity_type": "Ride",
+      "distance": 2123.63,
+      "average_grade": 6.6,
+      "maximum_grade": 12.8,
+      "elevation_high": 615.2,
+      "elevation_low": 474.4,
+      "start_latlng": [
+        47.121249390766025,
+        7.491925014182925
+      ],
+      "end_latlng": [
+        47.12433334439993,
+        7.47089465148747
+      ],
+      "elevation_profile": null,
+      "elevation_profiles": null,
+      "climb_category": 1,
+      "city": "Unterramsern",
+      "state": "Solothurn",
+      "country": "Switzerland",
+      "private": false,
+      "hazardous": false,
+      "starred": true
+    },
+    "pr_rank": null,
+    "achievements": [],
+    "visibility": "everyone",
+    "kom_rank": null
+  }
+]

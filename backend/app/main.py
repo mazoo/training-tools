@@ -5,9 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.database import Base, engine
+from app.database import AsyncSessionLocal, Base, engine
 from app.config import settings
 from app.routers import auth, internal, kom_qom, profile
+from app.services.permissions import ensure_default_authorization
 
 logging.basicConfig(level=logging.INFO)
 
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
             except Exception:
                 pass
+    async with AsyncSessionLocal() as session:
+        await ensure_default_authorization(session)
     yield
 
 

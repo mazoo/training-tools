@@ -34,6 +34,12 @@ client = StravaClient(access_token)
 
 `get_valid_access_token` transparently refreshes the token if it expires within 60 s.
 
+## Permission pattern
+
+Roles and permissions live in `models/athlete.py`, with helpers in `services/permissions.py`. Startup seeds the built-in `admin` role, the `backfill_from_ui` permission, and grants `admin` to the only connected athlete when no role assignments exist yet.
+
+Use `athlete_has_permission(db, athlete_id, BACKFILL_FROM_UI)` when an endpoint needs to report availability without failing. Use `Depends(require_permission(BACKFILL_FROM_UI))` when the endpoint itself must be blocked with `403 Missing permission`.
+
 ## Background task pattern
 
 Long operations (sync, enrichment) run as FastAPI `BackgroundTasks` and expose a status endpoint for polling.
@@ -127,7 +133,7 @@ Settings load in order: `settings.json` → `settings.local.json`, with local ta
 
 ## Frontend conventions
 
-- Auth state is stored in `localStorage` as a session token (key: `sessionToken`). `Layout.astro` manages it.
+- Auth state is stored in `localStorage` as a session token (key: `tt_token`). `Layout.astro` manages it.
 - API calls use plain `fetch("/api/...")` with `Authorization: Bearer <token>` header. No SDK.
-- Show loading state immediately; update UI on poll response. The status endpoint returns `task.status` ∈ `{running, done, error, rate_limited}`.
+- Show loading state immediately; update UI on poll response. The status endpoint returns `task.status` ∈ `{running, done, error, rate_limited}` plus current Strava budget counters.
 - Tailwind utility classes only; no custom CSS unless unavoidable.

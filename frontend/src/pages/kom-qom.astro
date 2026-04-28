@@ -73,12 +73,20 @@ import Layout from "../layouts/Layout.astro";
         </div>
       </div>
 
-      <button
-        id="btn-refresh"
-        class="mt-auto text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 transition-colors"
-      >
-        Refresh data
-      </button>
+      <div class="mt-auto flex flex-col gap-2">
+        <button
+          id="btn-backfill"
+          class="hidden text-sm bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 disabled:text-sky-200/60 border border-sky-500/60 disabled:border-sky-800 text-white rounded-lg px-3 py-2 transition-colors"
+        >
+          Run daily backfill
+        </button>
+        <button
+          id="btn-refresh"
+          class="text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 transition-colors"
+        >
+          Refresh data
+        </button>
+      </div>
     </aside>
 
     <!-- Main content -->
@@ -264,6 +272,28 @@ import Layout from "../layouts/Layout.astro";
     }
   }
 
+  async function loadBackfillAvailability() {
+    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
+    if (!btn) return;
+    hide("btn-backfill");
+
+    const t = token();
+    if (!t) return;
+
+    try {
+      const res = await fetch("/api/kom-qom/backfill/availability", { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.available) {
+        btn.disabled = false;
+        btn.textContent = "Run daily backfill";
+        show("btn-backfill");
+      }
+    } catch {
+      hide("btn-backfill");
+    }
+  }
+
   async function triggerRefresh() {
     const btn = document.getElementById("btn-refresh") as HTMLButtonElement;
     btn.disabled = true;
@@ -292,7 +322,7 @@ import Layout from "../layouts/Layout.astro";
         : 0;
       progressBar.style.width = `${pct}%`;
       const budget = s.strava_budget_remaining_15min != null
-        ? ` · ${s.strava_budget_remaining_15min} API calls left`
+        ? ` · ${s.strava_budget_remaining_15min} / ${s.strava_budget_remaining_daily} API calls left`
         : "";
       statusText.textContent = `Synced ${s.activities_processed} / ${s.activities_total} activities (${s.strava_calls_made} API calls${budget})`;
 
@@ -306,10 +336,68 @@ import Layout from "../layouts/Layout.astro";
             ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
             : 15;
           btn.textContent = `Rate limited — retry in ~${retryMin}m`;
+          loadBackfillAvailability();
           setTimeout(() => { btn.textContent = "Refresh data"; }, retryMin * 60 * 1000);
         } else {
           btn.textContent = "Refresh data";
           if (s.status === "done") loadCandidates();
+          loadBackfillAvailability();
+        }
+      }
+    }, 3000);
+  }
+
+  async function triggerBackfill() {
+    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Backfilling…";
+
+    const res = await fetch("/api/kom-qom/backfill", {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      btn.disabled = false;
+      btn.textContent = "Run daily backfill";
+      loadBackfillAvailability();
+      return;
+    }
+    const { task_id } = await res.json();
+
+    show("status-bar");
+    const statusText = document.getElementById("status-text")!;
+    const progressBar = document.getElementById("status-progress")!;
+
+    const poll = setInterval(async () => {
+      const sr = await fetch(`/api/kom-qom/backfill/${task_id}`, { headers: authHeaders() });
+      const s = await sr.json();
+      const pct = s.activities_total > 0
+        ? Math.round((s.activities_processed / s.activities_total) * 100)
+        : 0;
+      progressBar.style.width = `${pct}%`;
+      const budget = s.strava_budget_remaining_15min != null
+        ? ` · ${s.strava_budget_remaining_15min} / ${s.strava_budget_remaining_daily} API calls left`
+        : "";
+      statusText.textContent = `Backfilled ${s.activities_processed} / ${s.activities_total} segments (${s.strava_calls_made} API calls${budget})`;
+
+      if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
+        clearInterval(poll);
+        hide("status-bar");
+        btn.disabled = false;
+
+        if (s.status === "rate_limited") {
+          const retryMin = s.retry_after
+            ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
+            : 15;
+          btn.textContent = `Rate limited — retry in ~${retryMin}m`;
+          setTimeout(() => {
+            btn.textContent = "Run daily backfill";
+            loadBackfillAvailability();
+          }, retryMin * 60 * 1000);
+        } else {
+          btn.textContent = "Run daily backfill";
+          if (s.status === "done") loadCandidates();
+          loadBackfillAvailability();
         }
       }
     }, 3000);
@@ -318,6 +406,7 @@ import Layout from "../layouts/Layout.astro";
   // ── wire up ───────────────────────────────────────────────────────────────
 
   document.getElementById("btn-refresh")?.addEventListener("click", triggerRefresh);
+  document.getElementById("btn-backfill")?.addEventListener("click", triggerBackfill);
 
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
 
@@ -329,4 +418,5 @@ import Layout from "../layouts/Layout.astro";
   });
 
   loadCandidates();
+  loadBackfillAvailability();
 </script>

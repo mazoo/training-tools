@@ -11,7 +11,7 @@ A personal web application suite for cycling/running training analysis, built on
 | Backend | Python 3.12 + FastAPI | Async-native, great for I/O-bound Strava API work |
 | DB | SQLite (dev) → PostgreSQL (prod) via SQLAlchemy 2.x | Simple local dev, easy migration path |
 | Frontend | Astro 5 + TailwindCSS | MPA with islands; great for content-heavy tool pages |
-| Auth | Strava OAuth 2.0 + session token (itsdangerous) | Strava token stored in DB; session signed with `SECRET_KEY` |
+| Auth | Strava OAuth 2.0 + session token (itsdangerous) + DB roles/permissions | Strava token stored in DB; session signed with `SECRET_KEY`; privileged UI actions are permission-gated |
 | Rate limiting | Singleton in-process token-bucket, persisted across restarts | See `docs/STRAVA_API.md` and `backend/app/strava/rate_limiter.py` |
 
 ## Repository layout
@@ -38,21 +38,22 @@ training-tools/
 │   │   ├── tasks.py           ← in-memory background task tracker (UUID-keyed)
 │   │   ├── utils.py           ← haversine, time formatting, indoor detection
 │   │   ├── models/
-│   │   │   ├── athlete.py     ← AthleteToken, AthleteProfile, AthleteSyncState
-│   │   │   └── segment.py     ← SegmentEffortDigest, AthleteSegmentProfile, SegmentEnrichment
+│   │   │   ├── athlete.py     ← AthleteToken, AthleteProfile, AthleteSyncState, roles/permissions
+│   │   │   └── segment.py     ← SegmentEffortDigest, profiles, enrichment, segment backfill state
 │   │   ├── schemas/
 │   │   │   └── kom_qom.py     ← Pydantic response schemas for KOM/QOM feature
 │   │   ├── routers/
 │   │   │   ├── auth.py        ← Strava OAuth login/callback, /api/auth/me
 │   │   │   ├── profile.py     ← home address update, disconnect, account deletion
-│   │   │   ├── kom_qom.py     ← KOM/QOM candidates list, refresh, status polling
+│   │   │   ├── kom_qom.py     ← KOM/QOM candidates list, refresh, UI backfill, status polling
 │   │   │   └── internal.py    ← POST /api/internal/daily-backfill (cron endpoint)
 │   │   ├── services/
 │   │   │   ├── auth.py        ← session token create/decode, access token validation + refresh
-│   │   │   ├── sync.py        ← Strava sync orchestration (starred segments, activities, backfill)
+│   │   │   ├── sync.py        ← Strava sync orchestration (starred segments, activities, segment-effort backfill)
+│   │   │   ├── permissions.py ← role/permission seeding and checks
 │   │   │   └── kom_qom.py     ← KOM/QOM candidate filtering, gap-to-KOM computation
 │   │   └── strava/
-│   │       ├── client.py      ← StravaClient: OAuth exchange, athlete/activity/segment API
+│   │       ├── client.py      ← StravaClient: OAuth exchange, athlete/activity/segment-effort API
 │   │       └── rate_limiter.py← StravaRateLimiter: token-bucket, header sync, disk persistence
 │   ├── pyproject.toml
 │   └── .env.example
@@ -97,6 +98,7 @@ npm run dev                   # runs on :4321 (Astro default), proxies /api → 
 - **No direct Strava API calls outside `backend/app/strava/`**. All callers go through `StravaClient` so rate limiting is always enforced.
 - **Cache Strava responses in DB.** Segment details (including KOM time from `xoms`) are cached in `SegmentEnrichment` with a 7-day TTL. Never re-fetch if fresh data is available.
 - **Home location** defaults to env vars `HOME_LAT` / `HOME_LNG`. Athletes can override it per-account via `PUT /api/profile/home` (Nominatim geocoding stores result in `AthleteProfile`). Distance is Haversine via `utils.haversine_km`.
+- **Privileged UI actions are permission-gated.** Startup seeds the `admin` role and `backfill_from_ui` permission; the first/single connected athlete is granted `admin`.
 - **Feature routers** live in `backend/app/routers/`. Each feature is one file. Keep routers thin — business logic belongs in `services/`.
 - **Background tasks** use `tasks.py` for status tracking. Create with `create_task()`, update in-place, poll via a status endpoint. Tasks are in-memory only (lost on restart).
 - **Schema migrations**: there is no Alembic. New tables are created by `Base.metadata.create_all` at startup. New columns on existing tables go into the `migrations` list in `main.py` lifespan as `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`-style entries (wrapped in try/except for idempotency).

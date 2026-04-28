@@ -33,6 +33,53 @@ Cached Strava profile data plus per-athlete settings.
 
 ---
 
+## `roles` — `Role` (`models/athlete.py`)
+
+Local app roles used for authorization. Startup seeds `admin`.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | Integer PK | Autoincrement |
+| `name` | String unique | Stable role key, e.g. `admin` |
+| `label` | String | Human-readable label |
+
+---
+
+## `permissions` — `Permission` (`models/athlete.py`)
+
+Local app permissions granted through roles. Startup seeds `backfill_from_ui`.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | Integer PK | Autoincrement |
+| `code` | String unique | Stable permission key, e.g. `backfill_from_ui` |
+| `label` | String | Human-readable label |
+| `description` | String? | Optional detail for admin tooling |
+
+---
+
+## `role_permissions` — `RolePermission` (`models/athlete.py`)
+
+Join table granting permissions to roles.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `role_id` | Integer PK/FK | References `roles.id` |
+| `permission_id` | Integer PK/FK | References `permissions.id` |
+
+---
+
+## `athlete_roles` — `AthleteRole` (`models/athlete.py`)
+
+Join table assigning roles to Strava athletes. Startup grants `admin` to the only connected athlete when no role assignments exist.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `athlete_id` | Integer PK | Strava athlete ID |
+| `role_id` | Integer PK/FK | References `roles.id` |
+
+---
+
 ## `athlete_sync_state` — `AthleteSyncState` (`models/athlete.py`)
 
 Tracks sync progress for each athlete.
@@ -43,14 +90,29 @@ Tracks sync progress for each athlete.
 | `bootstrap_done` | Boolean | True after the first `run_sync` completes; guards backfill eligibility |
 | `last_activity_sync_at` | DateTime | Updated after each `run_sync`; used as `after` cursor for incremental syncs |
 | `last_star_sync_at` | DateTime | Updated after each starred-segment fetch |
-| `backfill_cursor_at` | DateTime | How far back the historical backfill has reached |
-| `backfill_complete` | Boolean | True once the full history (up to 365 days) has been fetched |
+| `backfill_cursor_at` | DateTime | Oldest timestamp covered once historical backfill completes |
+| `backfill_complete` | Boolean | True once starred-segment historical backfill has finished/skipped all segments; reset on starred sync so newly starred segments can be picked up |
+
+---
+
+## `segment_effort_backfill_state` — `SegmentEffortBackfillState` (`models/segment.py`)
+
+Tracks historical `GET /segment_efforts` progress per starred segment so a rate-limited daily run can resume without re-fetching completed segments.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `athlete_id` | Integer PK | |
+| `segment_id` | BigInteger PK | |
+| `status` | String | `pending`, `done`, or `skipped` |
+| `completed_at` | DateTime? | Set when the segment is done or skipped |
+| `last_attempt_at` | DateTime? | Last time the segment was attempted |
+| `last_error` | String? | Truncated error text for skipped segments |
 
 ---
 
 ## `segment_effort_digest` — `SegmentEffortDigest` (`models/segment.py`)
 
-One row per segment effort (attempt). This is the raw ledger of all efforts fetched from Strava.
+One row per segment effort (attempt). This is the raw ledger of all efforts fetched from Strava via detailed activities or direct `GET /segment_efforts` backfill.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -152,6 +214,33 @@ erDiagram
         datetime backfill_cursor_at
         boolean backfill_complete
     }
+    Role {
+        int id PK
+        string name
+        string label
+    }
+    Permission {
+        int id PK
+        string code
+        string label
+        string description
+    }
+    RolePermission {
+        int role_id PK
+        int permission_id PK
+    }
+    AthleteRole {
+        int athlete_id PK
+        int role_id PK
+    }
+    SegmentEffortBackfillState {
+        int athlete_id PK
+        bigint segment_id PK
+        string status
+        datetime completed_at
+        datetime last_attempt_at
+        string last_error
+    }
     SegmentEffortDigest {
         bigint effort_id PK
         int athlete_id FK
@@ -202,6 +291,11 @@ erDiagram
 
     AthleteToken      ||--|| AthleteProfile     : "athlete_id"
     AthleteToken      ||--|| AthleteSyncState   : "athlete_id"
+    AthleteToken      ||--o{ AthleteRole        : "athlete_id"
+    Role              ||--o{ AthleteRole        : "role_id"
+    Role              ||--o{ RolePermission     : "role_id"
+    Permission        ||--o{ RolePermission     : "permission_id"
+    AthleteSegmentProfile ||--o{ SegmentEffortBackfillState : "athlete_id + segment_id"
     SegmentEffortDigest }o--|| AthleteSegmentProfile : "athlete_id + segment_id"
     AthleteSegmentProfile }o--|| SegmentEnrichment  : "segment_id"
 ```

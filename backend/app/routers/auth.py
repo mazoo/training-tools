@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.athlete import AthleteProfile, AthleteToken
 from app.services.auth import create_session_token, get_current_athlete_id
+from app.services.permissions import get_authorization_state, grant_initial_admin_if_needed
 from app.strava.client import StravaClient, StravaRateLimitError
 
 router = APIRouter(tags=["auth"])
@@ -83,7 +84,7 @@ async def callback(
         )
     )
 
-    await db.commit()
+    await grant_initial_admin_if_needed(db, athlete_id)
 
     session_token = create_session_token(athlete_id)
     return RedirectResponse(url=f"{settings.frontend_url}/?token={session_token}")
@@ -98,6 +99,7 @@ async def me(
         select(AthleteProfile).where(AthleteProfile.athlete_id == athlete_id)
     )
     profile = result.scalar_one_or_none()
+    authz = await get_authorization_state(db, athlete_id)
 
     if profile:
         return {
@@ -108,6 +110,8 @@ async def me(
             "home_address": profile.home_address,
             "home_lat": profile.home_lat,
             "home_lng": profile.home_lng,
+            "roles": authz.roles,
+            "permissions": authz.permissions,
         }
 
     # Fallback for accounts connected before profile caching was added.
@@ -139,6 +143,7 @@ async def me(
         )
     )
     await db.commit()
+    authz = await get_authorization_state(db, athlete_id)
     return {
         "athlete_id": athlete_id,
         "firstname": athlete.get("firstname"),
@@ -147,4 +152,6 @@ async def me(
         "home_address": None,
         "home_lat": None,
         "home_lng": None,
+        "roles": authz.roles,
+        "permissions": authz.permissions,
     }

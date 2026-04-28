@@ -2,7 +2,7 @@
 
 ## Goal
 
-Show the athlete a list of their starred Strava segments where they have historically appeared in the top 10 or on the podium, so they can identify realistic KOM/QOM targets. The primary signal — `top10_seen` / `podium_seen` — is derived from `kom_rank` on individual segment efforts inside detailed activities. This approach does not depend on the leaderboard endpoint (removed by Strava).
+Show the athlete a list of their starred Strava segments where they have historically appeared in the top 10 or on the podium, so they can identify realistic KOM/QOM targets. The primary signal — `top10_seen` / `podium_seen` — is derived from `kom_rank` on individual segment efforts, imported from detailed activities during recent syncs and from `GET /segment_efforts` during historical backfill. This approach does not depend on the leaderboard endpoint (removed by Strava).
 
 ## User stories
 
@@ -10,6 +10,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 - As an athlete, I want to filter by effort time, gradient, indoor/outdoor, and podium-only, so I can match segments to a specific workout goal.
 - As an athlete, I want to see how many times I've ridden a segment and what average watts I've put out, so I can gauge my current form.
 - As an athlete, I want segments sorted by distance from home, so I can plan local efforts first.
+- As an admin, I want to start the historical backfill from the page when Strava budget is safe, so I can fill missing segment-effort history without using the cron endpoint manually.
 
 ## API contract
 
@@ -121,12 +122,42 @@ Poll refresh progress.
   "activities_total": 25,
   "strava_calls_made": 20,
   "strava_budget_remaining_15min": 180,
+  "strava_budget_remaining_daily": 1800,
   "error": null,
   "retry_after": null
 }
 ```
 
 `status` ∈ `{ running, done, error, rate_limited }`. When `status` is `rate_limited`, `retry_after` is an ISO 8601 datetime indicating when to resume.
+
+### `GET /api/kom-qom/backfill/availability`
+
+Returns whether the current athlete can see/start the UI backfill button. Requires a valid session; does not fail just because the permission is missing.
+
+```json
+{
+  "has_permission": true,
+  "available": true,
+  "reason": null,
+  "strava_budget_remaining_15min": 180,
+  "strava_budget_remaining_daily": 1800,
+  "retry_after_seconds": null
+}
+```
+
+`available` is true only when the athlete has `backfill_from_ui`, the 15-minute budget is above the standard headroom, and daily budget is at least the backfill threshold (150 remaining calls). `reason` is one of `missing_permission`, `rate_limited_15min`, or `rate_limited_daily` when unavailable.
+
+### `POST /api/kom-qom/backfill`
+
+Starts this athlete's historical starred-segment effort backfill in a background task. Requires `backfill_from_ui`; returns `403` without it and `429` when the current budget is unsafe.
+
+```json
+{ "task_id": "abc123", "message": "Backfill started" }
+```
+
+### `GET /api/kom-qom/backfill/{task_id}`
+
+Polls UI backfill progress using the same status shape as refresh. `activities_processed` / `activities_total` represent starred segments for this task.
 
 ## Frontend
 
@@ -151,6 +182,9 @@ Layout:
 │                      │  Kleine Scheidegg             5.1km │
 │  Surface             │      ...                            │
 │  ○ All  ○ Out  ○ In  │                                      │
+│                      │                                      │
+│  [Run daily backfill]│  visible only with permission +      │
+│  [Refresh data]      │  safe Strava budget                  │
 └──────────────────────┴──────────────────────────────────────┘
 ```
 
@@ -166,7 +200,7 @@ Each segment card shows:
 - Average grade + total distance + elevation gain (`elevation_high - elevation_low`)
 - City / state / country; `hazardous` warning if flagged
 
-Filters are applied client-side — all candidates are fetched once on page load. No extra API call on filter change.
+Filters are applied client-side — all candidates are fetched once on page load. No extra API call on filter change. The daily backfill button is hidden unless `/api/kom-qom/backfill/availability` reports `available = true`.
 
 ## Business logic
 
@@ -180,10 +214,10 @@ A segment is a candidate if, in `athlete_segment_profile`:
 
 ### Building `top10_seen` / `podium_seen`
 
-When processing `segment_efforts` from a detailed activity:
+When processing segment efforts from either a detailed activity or direct `GET /segment_efforts` response:
 
 ```python
-for effort in activity["segment_efforts"]:
+for effort in efforts:
     rank = effort.get("kom_rank")       # int 1–10 or None
     upsert_effort_digest(effort)
     if rank is not None:
@@ -242,13 +276,13 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 2. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
 3. Subsequent loads read from local DB with no Strava calls.
 4. Manual refresh fetches activities newer than `last_activity_sync_at` only.
-5. Historical data beyond 30 days is extended by the daily backfill cron, 30 days per run, up to 365 days total.
+5. Historical data beyond the initial recent sync is extended by the daily backfill cron or by the permissioned UI backfill button. It processes starred segments directly with broad `GET /segment_efforts?per_page=200` windows over the 365-day lookback, marking each segment done/skipped so later runs resume from the remaining segments.
 
 ## Edge cases
 
 | Case | Handling |
 |------|---------|
-| `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment excluded from candidates |
+| `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment can still appear if ridden, without top-10/podium rank history |
 | Athlete has efforts but no power meter | `best_avg_watts = null`; card omits watts row |
 | `xoms` absent from segment detail | `kom_time_s = null`; gap row omitted from card |
 | Segment deleted from Strava | 404 from `GET /segments/{id}` → skip enrichment, retain profile from effort history |

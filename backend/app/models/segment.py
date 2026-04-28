@@ -70,3 +70,14 @@ class SegmentEnrichment(Base):
     hazardous: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     kom_time_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cached_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SegmentEffortBackfillState(Base):
+    __tablename__ = "segment_effort_backfill_state"
+
+    athlete_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    segment_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempt_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -71,5 +71,15 @@ class RefreshStatusResponse(BaseModel):
     activities_total: int
     strava_calls_made: int
     strava_budget_remaining_15min: int
+    strava_budget_remaining_daily: int
     error: str | None = None
     retry_after: datetime | None = None
+
+
+class BackfillAvailabilityResponse(BaseModel):
+    has_permission: bool
+    available: bool
+    reason: str | None = None
+    strava_budget_remaining_15min: int
+    strava_budget_remaining_daily: int
+    retry_after_seconds: int | None = None

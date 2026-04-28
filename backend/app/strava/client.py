@@ -71,6 +71,20 @@ class StravaClient:
         # not just PRs — segment metadata (name, grade, latlng) is embedded here.
         return await self._get(f"/activities/{activity_id}", {"include_all_efforts": "true"})
 
+    async def get_segment_efforts(
+        self,
+        segment_id: int,
+        start_date_local: str | None = None,
+        end_date_local: str | None = None,
+        per_page: int = 200,
+    ) -> list[dict]:
+        params: dict = {"segment_id": segment_id, "per_page": per_page}
+        if start_date_local is not None:
+            params["start_date_local"] = start_date_local
+        if end_date_local is not None:
+            params["end_date_local"] = end_date_local
+        return await self._get("/segment_efforts", params)
+
     async def get_segment(self, segment_id: int) -> dict:
         return await self._get(f"/segments/{segment_id}")
 

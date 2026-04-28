@@ -20,7 +20,7 @@ async def daily_backfill(
     _: None = Depends(_require_backfill_secret),
 ) -> dict:
     """
-    Advance each athlete's backfill cursor by one chunk (_BACKFILL_CHUNK_DAYS days).
+    Advance each athlete's starred-segment effort backfill.
     Designed to be called once per day by a system cron job:
 
         curl -X POST http://localhost:8000/api/internal/daily-backfill \

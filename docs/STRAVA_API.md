@@ -37,9 +37,9 @@ Strava enforces two windows per application (not per user):
 
 `backend/app/strava/rate_limiter.py` implements a **proactive token bucket** via a module-level singleton `rate_limiter`. The strategy is to raise *before* the HTTP call, not after a 429 response.
 
-Every outgoing Strava request calls `await rate_limiter.acquire()` first. If remaining budget is below a headroom threshold, `BudgetExhausted` is raised immediately — no sleep, no waiting:
+Every outgoing Strava request calls `await rate_limiter.acquire()` first. If remaining budget is at or below a headroom threshold, `BudgetExhausted` is raised immediately — no sleep, no waiting:
 
-| Window | Limit | Headroom (raises when below) |
+| Window | Limit | Headroom (raises when remaining is <=) |
 |--------|-------|------------------------------|
 | 15 min | 200 | 20 |
 | Daily  | 2000 | 100 |
@@ -47,6 +47,8 @@ Every outgoing Strava request calls `await rate_limiter.acquire()` first. If rem
 After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). State is persisted to `rate_limit_state.json` so budget survives process restarts.
 
 Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
+
+The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150.
 
 ### Staying safe
 
@@ -80,7 +82,7 @@ Important fields:
 }
 ```
 
-### Detailed activity — primary source of rank and watts data
+### Detailed activity — recent sync source of rank and watts data
 
 ```
 GET /activities/{id}?include_all_efforts=true
@@ -89,7 +91,7 @@ Headers: Authorization: Bearer {access_token}
 
 > **Always pass `include_all_efforts=true`.** Without it Strava returns only the athlete's PR efforts per segment, silently omitting non-PR segment efforts. This is the single most important parameter for correct `top10_seen` / `podium_seen` tracking.
 
-This is the **primary data source** for KOM/QOM signals. The response includes a `segment_efforts` array. Each element represents one time the athlete passed through that segment during this activity:
+This is the recent/manual sync data source for KOM/QOM signals. The response includes a `segment_efforts` array. Each element represents one time the athlete passed through that segment during this activity:
 
 ```json
 {
@@ -118,6 +120,23 @@ This is the **primary data source** for KOM/QOM signals. The response includes a
 | `elapsed_time` | Wall-clock duration in seconds. Source for `best_time_s`. |
 
 > **Important:** `kom_rank` reflects the leaderboard state at the time the effort was recorded. It is not updated retroactively if someone subsequently beats the athlete's time. For our purposes (`top10_seen`, `podium_seen`) this is the correct and only reliable rank signal available via the Strava API — the leaderboard endpoint has been removed.
+
+### Segment efforts — historical starred-segment backfill
+
+```
+GET /segment_efforts
+  ?segment_id={segment_id}
+  &start_date_local={iso_datetime}
+  &end_date_local={iso_datetime}
+  &per_page=200
+Headers: Authorization: Bearer {access_token}
+```
+
+Used by daily historical backfill after starred segments are known. This endpoint returns `DetailedSegmentEffort` objects for the authenticated athlete on one segment, including `activity.id`, timing, watts, embedded `segment` metadata, `kom_rank`, and `pr_rank`.
+
+Backfill asks for a broad 365-day window with `per_page=200`. In the normal case this returns all efforts for that starred segment in one call. If Strava returns exactly 200 efforts, the result may be capped, so the service splits the date window and retries each half until each window returns fewer than 200 efforts.
+
+> **Availability:** Strava documents this endpoint as requiring a subscription. If a segment-effort request returns a permanent per-segment error such as 400/403/404, the backfill records it as skipped and continues; transient errors are retried on a later run. Recent/manual sync via detailed activities remains available.
 
 ### Segment detail (enrichment only)
 

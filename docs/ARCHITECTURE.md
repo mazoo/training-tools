@@ -15,11 +15,17 @@ Strava API  (api.strava.com/v3)
 
 The backend is the only component that ever calls Strava. The frontend talks only to the backend. This keeps the Strava OAuth tokens server-side and makes rate-limit enforcement trivial (single process).
 
+## Authorization model
+
+Authentication is Strava OAuth plus a signed session token. Authorization is local: `roles`, `permissions`, `role_permissions`, and `athlete_roles` define privileged app capabilities without depending on Strava.
+
+Startup seeds an `admin` role and the `backfill_from_ui` permission, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom.
+
 ## Two-layer data model
 
-**Layer 1 — Activity import (primary, reliable)**
+**Layer 1 — Effort import (primary, reliable)**
 
-`GET /activities/{id}` returns `segment_efforts[]`. Each effort carries `kom_rank` (null if the athlete was outside top 10 at the time), `average_watts`, `elapsed_time`, and `moving_time`. These are stored verbatim in `segment_effort_digest` and then aggregated into `athlete_segment_profile`.
+Recent/manual sync imports efforts from `GET /activities/{id}?include_all_efforts=true`. Historical backfill imports starred-segment efforts directly from `GET /segment_efforts`. In both cases, each effort carries `kom_rank` (null if the athlete was outside top 10 at the time), `average_watts`, `elapsed_time`, and `moving_time`. These are stored verbatim in `segment_effort_digest` and then aggregated into `athlete_segment_profile`.
 
 `top10_seen` and `podium_seen` are derived here and are the primary signals for KOM/QOM candidate identification. They do not depend on the leaderboard endpoint (which Strava removed).
 
@@ -50,13 +56,29 @@ The backend is the only component that ever calls Strava. The frontend talks onl
       → store geometry + optional xoms data in segment_enrichment
 ```
 
+### Historical backfill
+
+```
+1. Read pending starred segments from local DB
+   └─ skip segments already marked done/skipped in segment_effort_backfill_state
+
+2. For each pending starred segment:
+   GET /segment_efforts?segment_id={id}&start_date_local={now-365d}&end_date_local={now}&per_page=200
+   └─ normally returns all efforts for that segment in one call
+   └─ if exactly 200 efforts are returned, split the date window and retry each half
+
+3. Store efforts in segment_effort_digest
+   └─ recompute athlete_segment_profile for touched segments
+   └─ mark the segment done/skipped so a rate-limited run resumes at the next segment
+```
+
 ### Query path (hot, no Strava calls)
 
 ```
 GET /api/kom-qom/candidates
         │
         ├─ 1. Read athlete_segment_profile WHERE is_starred = true
-        │      AND (top10_seen = true OR podium_seen = true)
+        │      AND times_ridden > 0
         │
         ├─ 2. JOIN segment_enrichment  (for grade, geometry, xoms)
         │      Compute distance_from_home_km = haversine(start_lat, start_lng, home_lat, home_lng)
@@ -79,6 +101,7 @@ GET /api/kom-qom/candidates
 | Starred segments (geometry, PR, is_kom) | `GET /athlete/segments/starred` | Every sync | — |
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
+| Starred segment efforts | `GET /segment_efforts` | Daily historical backfill; one broad call per starred segment in the normal case | — |
 | Segment enrichment | `GET /segments/{id}` | Stale after **7 days**; starred segments only | 7 days |
 
 On a full cold-start for an athlete with 100 starred segments and 200 recent activities:
@@ -86,6 +109,10 @@ On a full cold-start for an athlete with 100 starred segments and 200 recent act
 - 1 call: starred segments
 - ~200 calls: activity details (spread over multiple 15-min windows as needed)
 - up to 100 calls: segment enrichment (background, non-blocking)
+
+Historical backfill then proceeds separately. In the normal case it uses one `GET /segment_efforts` call per starred segment over the 365-day lookback; dense segments that hit the `per_page=200` cap are split into smaller date windows.
+
+Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 
 The query path reads only local DB — no Strava calls during a page load.
 
@@ -111,18 +138,55 @@ CREATE TABLE athlete_profile (
     home_lng        REAL
 );
 
+-- Local authorization.
+CREATE TABLE roles (
+    id      INTEGER PRIMARY KEY,
+    name    TEXT NOT NULL UNIQUE,       -- e.g. admin
+    label   TEXT NOT NULL
+);
+
+CREATE TABLE permissions (
+    id           INTEGER PRIMARY KEY,
+    code         TEXT NOT NULL UNIQUE,  -- e.g. backfill_from_ui
+    label        TEXT NOT NULL,
+    description  TEXT
+);
+
+CREATE TABLE role_permissions (
+    role_id        INTEGER NOT NULL,
+    permission_id  INTEGER NOT NULL,
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE TABLE athlete_roles (
+    athlete_id  INTEGER NOT NULL,
+    role_id     INTEGER NOT NULL,
+    PRIMARY KEY (athlete_id, role_id)
+);
+
 -- Sync progress per athlete
 CREATE TABLE athlete_sync_state (
     athlete_id              INTEGER PRIMARY KEY,
     bootstrap_done          BOOLEAN DEFAULT 0,  -- true after the first run_sync completes
     last_activity_sync_at   DATETIME,           -- updated after each run_sync
     last_star_sync_at       DATETIME,           -- updated after each starred-segment fetch
-    backfill_cursor_at      DATETIME,           -- how far back the historical backfill has reached
-    backfill_complete       BOOLEAN DEFAULT 0
+    backfill_cursor_at      DATETIME,           -- oldest timestamp covered once historical backfill completes
+    backfill_complete       BOOLEAN DEFAULT 0    -- reset on starred sync to catch newly starred segments
 );
 
--- One row per segment effort extracted from a detailed activity.
--- Source: GET /activities/{id} → segment_efforts[]
+-- Per-starred-segment historical backfill progress.
+CREATE TABLE segment_effort_backfill_state (
+    athlete_id       INTEGER NOT NULL,
+    segment_id       INTEGER NOT NULL,
+    status           TEXT NOT NULL,      -- pending | done | skipped
+    completed_at     DATETIME,
+    last_attempt_at  DATETIME,
+    last_error       TEXT,
+    PRIMARY KEY (athlete_id, segment_id)
+);
+
+-- One row per segment effort.
+-- Sources: GET /activities/{id} → segment_efforts[], GET /segment_efforts
 CREATE TABLE segment_effort_digest (
     effort_id       INTEGER PRIMARY KEY,   -- Strava segment_effort.id
     athlete_id      INTEGER NOT NULL,
@@ -194,8 +258,10 @@ CREATE TABLE segment_enrichment (
 
 The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It maintains an in-process token-bucket and raises `BudgetExhausted` *before* making an HTTP call when headroom thresholds are breached:
 
-- 15-min window: raises when `remaining < 20` (out of 200)
-- Daily window: raises when `remaining < 100` (out of 2000)
+- 15-min window: raises when `remaining <= 20` (out of 200)
+- Daily window: raises when `remaining <= 100` (out of 2000)
+
+UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls, matching the daily backfill runner's safety buffer.
 
 After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth) and persists state to `rate_limit_state.json` so budget survives process restarts.
 
