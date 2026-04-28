@@ -135,7 +135,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function rankBadge(c: any): string {
-    if (c.best_seen_kom_rank === 1) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
+    if (c.is_kom || c.best_seen_kom_rank === 1) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
     if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">🥉 Podium</span>`;
     return `<span class="text-gray-500 text-xs">Top 10</span>`;
   }
