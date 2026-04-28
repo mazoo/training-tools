@@ -103,8 +103,11 @@ import Layout from "../layouts/Layout.astro";
 
       <!-- Empty / loading states -->
       <div id="state-loading" class="text-gray-500 text-sm py-8 text-center">Loading…</div>
-      <div id="state-empty" class="hidden text-gray-500 text-sm py-8 text-center">
+      <div id="state-empty-no-data" class="hidden text-gray-500 text-sm py-8 text-center">
         No candidates yet.<br />Hit <strong class="text-gray-400">Refresh data</strong> to sync your Strava history.
+      </div>
+      <div id="state-empty-filtered" class="hidden text-gray-500 text-sm py-8 text-center">
+        No segments match the active filters.
       </div>
       <div id="state-unauthenticated" class="hidden text-gray-500 text-sm py-8 text-center">
         <a href="/auth/login" class="text-sky-500 hover:text-sky-400">Connect Strava</a> to see your candidates.
@@ -212,10 +215,17 @@ import Layout from "../layouts/Layout.astro";
     const list = document.getElementById("candidate-list")!;
     if (filtered.length === 0) {
       hide("candidate-list");
-      show("state-empty");
+      hide("state-empty-no-data");
+      if (allCandidates.length === 0) {
+        hide("state-empty-filtered");
+        show("state-empty-no-data");
+      } else {
+        show("state-empty-filtered");
+      }
     } else {
       list.innerHTML = filtered.map(card).join("");
-      hide("state-empty");
+      hide("state-empty-no-data");
+      hide("state-empty-filtered");
       show("candidate-list");
     }
   }
@@ -224,7 +234,8 @@ import Layout from "../layouts/Layout.astro";
 
   async function loadCandidates() {
     hide("state-loading");
-    hide("state-empty");
+    hide("state-empty-no-data");
+    hide("state-empty-filtered");
     hide("state-unauthenticated");
     hide("candidate-list");
     show("state-loading");
@@ -249,7 +260,7 @@ import Layout from "../layouts/Layout.astro";
       applyFilters();
     } catch {
       hide("state-loading");
-      show("state-empty");
+      show("state-empty-no-data");
     }
   }
 
