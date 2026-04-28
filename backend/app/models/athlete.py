@@ -34,3 +34,7 @@ class AthleteSyncState(Base):
     bootstrap_done: Mapped[bool] = mapped_column(Boolean, default=False)
     last_activity_sync_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     last_star_sync_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    # Oldest activity timestamp already fetched; None = initial sync not yet done.
+    # Daily backfill extends this backward by _BACKFILL_CHUNK_DAYS each run.
+    backfill_cursor_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    backfill_complete: Mapped[bool] = mapped_column(Boolean, default=False)

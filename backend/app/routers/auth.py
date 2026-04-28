@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -14,6 +16,7 @@ router = APIRouter(tags=["auth"])
 
 STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize"
 SCOPES = "read,activity:read,profile:read_all"
+_CALLBACK_PATH = urlparse(settings.strava_redirect_uri).path
 
 
 @router.get("/auth/login")
@@ -29,7 +32,7 @@ async def login() -> RedirectResponse:
     return RedirectResponse(url=url)
 
 
-@router.get("/auth/callback")
+@router.get(_CALLBACK_PATH)
 async def callback(
     code: str | None = None,
     error: str | None = None,

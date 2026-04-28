@@ -9,7 +9,7 @@ import Layout from "../layouts/Layout.astro";
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Filters</h2>
 
       <label class="flex items-center gap-2 cursor-pointer">
-        <input id="f-podium" type="checkbox" class="accent-strava w-4 h-4" />
+        <input id="f-podium" type="checkbox" class="accent-sky-500 w-4 h-4" />
         <span class="text-sm text-gray-300">Podium only (top 3)</span>
       </label>
 
@@ -65,7 +65,7 @@ import Layout from "../layouts/Layout.astro";
                 name="surface"
                 value={val}
                 checked={val === "all"}
-                class="accent-strava"
+                class="accent-sky-500"
               />
               <span class="text-sm text-gray-300 capitalize">{val}</span>
             </label>
@@ -87,7 +87,7 @@ import Layout from "../layouts/Layout.astro";
       <div id="status-bar" class="hidden mb-4 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-400">
         <span id="status-text">Syncing…</span>
         <div class="mt-1 h-1 bg-gray-800 rounded-full overflow-hidden">
-          <div id="status-progress" class="h-full bg-strava rounded-full transition-all" style="width:0%"></div>
+          <div id="status-progress" class="h-full bg-sky-500 rounded-full transition-all" style="width:0%"></div>
         </div>
       </div>
 
@@ -97,7 +97,7 @@ import Layout from "../layouts/Layout.astro";
         No candidates yet.<br />Hit <strong class="text-gray-400">Refresh data</strong> to sync your Strava history.
       </div>
       <div id="state-unauthenticated" class="hidden text-gray-500 text-sm py-8 text-center">
-        <a href="/auth/login" class="text-strava hover:text-orange-400">Connect Strava</a> to see your candidates.
+        <a href="/auth/login" class="text-sky-500 hover:text-sky-400">Connect Strava</a> to see your candidates.
       </div>
 
       <!-- Candidate list -->
@@ -126,7 +126,7 @@ import Layout from "../layouts/Layout.astro";
 
   function rankBadge(c: any): string {
     if (c.best_seen_kom_rank === 1) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
-    if (c.podium_seen) return `<span class="text-orange-400 font-bold text-xs">🥉 Podium</span>`;
+    if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">🥉 Podium</span>`;
     return `<span class="text-gray-500 text-xs">Top 10</span>`;
   }
 
@@ -150,7 +150,7 @@ import Layout from "../layouts/Layout.astro";
           <div class="flex items-center gap-2 min-w-0">
             ${rankBadge(c)}
             <a href="${c.segment_url}" target="_blank" rel="noopener"
-               class="text-white font-medium hover:text-orange-400 transition-colors truncate">
+               class="text-white font-medium hover:text-sky-400 transition-colors truncate">
               ${c.segment_name}
             </a>
           </div>
@@ -164,7 +164,7 @@ import Layout from "../layouts/Layout.astro";
         </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
           <span>${grade} avg · ${distSeg}</span>
-          ${gap ? `<span class="text-orange-400">${gap}</span>` : ""}
+          ${gap ? `<span class="text-sky-400">${gap}</span>` : ""}
           ${location ? `<span>${location}</span>` : ""}
         </div>
       </div>`;

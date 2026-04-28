@@ -3,9 +3,7 @@ export default {
   content: ["./src/**/*.{astro,html,js,ts}"],
   theme: {
     extend: {
-      colors: {
-        strava: "#fc4c02",
-      },
+      colors: {},
     },
   },
 };

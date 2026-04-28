@@ -6,7 +6,7 @@ Strava uses OAuth 2.0. The flow:
 
 1. Frontend redirects athlete to `https://www.strava.com/oauth/authorize` with:
    - `client_id`
-   - `redirect_uri` = `http://localhost:8000/auth/callback` (dev, matches registered Strava app)
+   - `redirect_uri` = `http://localhost:8000/auth/strava/callback` (dev, matches registered Strava app)
    - `response_type=code`
    - `scope=read,activity:read,profile:read_all`  — **minimum required scopes for this app**
 2. Strava redirects back with `?code=…`
@@ -35,16 +35,18 @@ Strava enforces two windows per application (not per user):
 
 ### Rate-limit implementation
 
-`backend/app/strava/rate_limiter.py` implements a **token bucket**:
+`backend/app/strava/rate_limiter.py` implements a **proactive token bucket** via a module-level singleton `rate_limiter`. The strategy is to raise *before* the HTTP call, not after a 429 response.
 
-```python
-BUCKET_15MIN = TokenBucket(capacity=200, refill_interval_s=900)
-BUCKET_DAILY = TokenBucket(capacity=2000, refill_interval_s=86400)
-```
+Every outgoing Strava request calls `await rate_limiter.acquire()` first. If remaining budget is below a headroom threshold, `BudgetExhausted` is raised immediately — no sleep, no waiting:
 
-Every outgoing Strava request must call `await rate_limiter.acquire()` first. If either bucket is empty, the call waits (async sleep) until the next refill boundary, then proceeds.
+| Window | Limit | Headroom (raises when below) |
+|--------|-------|------------------------------|
+| 15 min | 200 | 20 |
+| Daily  | 2000 | 100 |
 
-The `X-RateLimit-Limit` and `X-RateLimit-Usage` headers are read on every response and used to _synchronise_ the local bucket state — this prevents drift if requests are made from other clients.
+After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). State is persisted to `rate_limit_state.json` so budget survives process restarts.
+
+Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
 
 ### Staying safe
 
@@ -81,9 +83,11 @@ Important fields:
 ### Detailed activity — primary source of rank and watts data
 
 ```
-GET /activities/{id}
+GET /activities/{id}?include_all_efforts=true
 Headers: Authorization: Bearer {access_token}
 ```
+
+> **Always pass `include_all_efforts=true`.** Without it Strava returns only the athlete's PR efforts per segment, silently omitting non-PR segment efforts. This is the single most important parameter for correct `top10_seen` / `podium_seen` tracking.
 
 This is the **primary data source** for KOM/QOM signals. The response includes a `segment_efforts` array. Each element represents one time the athlete passed through that segment during this activity:
 
@@ -122,7 +126,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used only for segment geometry and the optional KOM time. Called only for starred segments, cached 24 h.
+Used only for segment geometry and the optional KOM time. Called only for starred segments, cached **7 days**.
 
 ```json
 {
@@ -146,7 +150,7 @@ Used only for segment geometry and the optional KOM time. Called only for starre
 }
 ```
 
-**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` and `gap_to_kom_s` as optional enrichment — the app works without them. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s`.
+**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s`. Note: `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s`.
 
 Parsing `xoms.kom` to seconds:
 ```python

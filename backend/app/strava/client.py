@@ -53,11 +53,17 @@ class StravaClient:
         return results
 
     async def get_activities(
-        self, after: int | None = None, per_page: int = 200, page: int = 1
+        self,
+        after: int | None = None,
+        before: int | None = None,
+        per_page: int = 200,
+        page: int = 1,
     ) -> list[dict]:
         params: dict = {"per_page": per_page, "page": page}
         if after is not None:
             params["after"] = after
+        if before is not None:
+            params["before"] = before
         return await self._get("/athlete/activities", params)
 
     async def get_activity(self, activity_id: int) -> dict:

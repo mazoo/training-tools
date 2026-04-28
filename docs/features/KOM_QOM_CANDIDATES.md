@@ -47,11 +47,12 @@ Show the athlete a list of their starred Strava segments where they have histori
       "times_ridden": 7,
       "best_avg_watts": 328.5,
       "latest_avg_watts": 310.2,
-      "last_ridden_at": "2025-06-01",
+      "last_ridden_at": "2025-06-01T09:30:00Z",
       "kom_time_s": 820,
       "kom_time_display": "13:40",
       "gap_to_kom_s": 27,
       "gap_to_kom_display": "0:27",
+      "gap_to_kom_pct": 3.3,
       "average_grade": 7.8,
       "distance_m": 4321,
       "distance_from_home_km": 3.2,
@@ -66,23 +67,30 @@ Show the athlete a list of their starred Strava segments where they have histori
 ```
 
 Notes:
-- `kom_time_s`, `gap_to_kom_s`, and their display variants may be `null` if `xoms` enrichment is unavailable.
+- `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if `xoms` enrichment is unavailable.
+- `gap_to_kom_pct` is `(best_time_s - kom_time_s) / kom_time_s * 100`, expressing how far off KOM the athlete is as a percentage.
 - `best_avg_watts` / `latest_avg_watts` may be `null` for athletes without a power meter.
 - `distance_from_home_km` may be `null` if `HOME_LAT`/`HOME_LNG` are not configured or `start_latlng` is absent.
+- `last_ridden_at` is an ISO 8601 datetime string (not date-only).
 
 #### Response `429 Too Many Requests`
 
 ```json
 {
-  "detail": "Strava rate limit reached",
-  "retry_after_s": 312
+  "detail": { "strava_error": "Rate limit reached", "retry_after_s": 312 }
 }
 ```
 
 ### `POST /api/kom-qom/refresh`
 
-Triggers an incremental activity sync and segment enrichment pass.
+Triggers an activity sync and segment enrichment pass.
 Returns `202 Accepted` immediately; runs in a background task.
+
+#### Query parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `full` | boolean | `false` | If true, re-sync all activities (not just since last sync) |
 
 ```json
 { "task_id": "abc123", "message": "Refresh started" }
@@ -98,15 +106,19 @@ Poll refresh progress.
   "activities_processed": 18,
   "activities_total": 25,
   "strava_calls_made": 20,
-  "strava_budget_remaining_15min": 180
+  "strava_budget_remaining_15min": 180,
+  "error": null,
+  "retry_after": null
 }
 ```
 
-## Frontend components (Astro)
+`status` ∈ `{ running, done, error, rate_limited }`. When `status` is `rate_limited`, `retry_after` is an ISO 8601 datetime indicating when to resume.
+
+## Frontend
 
 ### Page: `src/pages/kom-qom.astro`
 
-Server-rendered shell with a client-side island for the interactive filter+list panel.
+Single `.astro` file with an inline `<script>` block for interactivity. No separate component files — filters and card rendering are handled in the page script.
 
 Layout:
 ```
@@ -128,19 +140,15 @@ Layout:
 └──────────────────────┴──────────────────────────────────────┘
 ```
 
-### Component: `SegmentCard.astro`
-
-Displays one candidate. Shows:
-- Rank badge: star icon if `best_seen_kom_rank == 1` (held KOM), podium badge if `podium_seen`, top-10 badge otherwise
+Each segment card shows:
+- Rank badge: star if `best_seen_kom_rank == 1` (held KOM), podium if `podium_seen`, top-10 otherwise
 - Segment name + Strava link
 - Distance from home (km)
-- Best time vs latest time; gap to KOM (if available)
+- Best time vs latest time; gap to KOM and `gap_to_kom_pct` (if available)
 - Best watts / latest watts (if available)
 - Times ridden + last ridden date
 - Average grade + total distance
 - City/country
-
-### Component: `FilterPanel` (interactive island)
 
 Filters are applied client-side — all candidates are fetched once on page load. No extra API call on filter change.
 
@@ -150,7 +158,9 @@ Filters are applied client-side — all candidates are fetched once on page load
 
 A segment is a candidate if, in `athlete_segment_profile`:
 1. `is_starred = true`
-2. `top10_seen = true` (or `podium_seen = true` if `podium_only` filter is active)
+2. `times_ridden > 0`
+
+`top10_seen` and `podium_seen` are **not** default filters — they are surfaced on each card so the athlete can see their rank history. The `podium_only` filter optionally restricts to `podium_seen = true`.
 
 ### Building `top10_seen` / `podium_seen`
 
@@ -211,12 +221,11 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first load (cold DB), endpoint triggers a bounded bootstrap automatically:
-   - Sync starred segments
-   - Fetch last N activities (configurable, default 200) and extract segment efforts
+1. On first sync (`bootstrap_done = false`), `run_sync` fetches activities from the **last 30 days** (time-based window, not a count). This gives candidates quickly without burning the full budget.
 2. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
 3. Subsequent loads read from local DB with no Strava calls.
-4. Manual refresh fetches activities newer than the last sync timestamp only.
+4. Manual refresh fetches activities newer than `last_activity_sync_at` only.
+5. Historical data beyond 30 days is extended by the daily backfill cron, 30 days per run, up to 365 days total.
 
 ## Edge cases
 

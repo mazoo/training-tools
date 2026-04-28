@@ -20,5 +20,10 @@ node_modules/
 dist/
 .astro/
 
+# Agent / IDE local config (each developer keeps their own)
+.claude/settings.local.json
+.cursor/
+.copilot/
+
 # OS
 .DS_Store

@@ -12,10 +12,11 @@ class Settings(BaseSettings):
 
     strava_client_id: str
     strava_client_secret: str
-    strava_redirect_uri: str = "http://localhost:8000/auth/callback"
-    frontend_url: str = "http://localhost:4321"
+    strava_redirect_uri: str          # e.g. http://localhost:8000/auth/strava/callback
+    frontend_url: str                 # e.g. http://localhost:4321
     database_url: str = "sqlite+aiosqlite:///./training_tools.db"
-    secret_key: str = "change-me-in-production"
+    secret_key: str                   # random secret for session signing
+    backfill_secret: str              # random secret for POST /api/internal/daily-backfill
     home_lat: float | None = None
     home_lng: float | None = None
 

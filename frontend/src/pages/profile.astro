@@ -44,7 +44,7 @@ import Layout from "../layouts/Layout.astro";
         </div>
         <a
           href="/auth/login"
-          class="inline-block bg-strava text-white text-sm px-5 py-2 rounded-lg font-medium hover:bg-orange-500 transition-colors"
+          class="inline-block bg-sky-500 text-white text-sm px-5 py-2 rounded-lg font-medium hover:bg-sky-400 transition-colors"
         >
           Connect with Strava
         </a>
@@ -52,7 +52,7 @@ import Layout from "../layouts/Layout.astro";
     </section>
 
     <!-- Home location card -->
-    <section class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
       <h2 class="text-base font-semibold text-white mb-1">Home Location</h2>
       <p class="text-sm text-gray-500 mb-5">
         Used to sort KOM / QOM candidates by distance from home.
@@ -83,6 +83,40 @@ import Layout from "../layouts/Layout.astro";
           <span id="home-feedback" class="text-sm"></span>
         </div>
       </form>
+    </section>
+
+    <!-- Danger zone -->
+    <section id="danger-zone" class="hidden border border-red-900 rounded-xl p-6">
+      <h2 class="text-base font-semibold text-red-400 mb-1">Danger Zone</h2>
+      <p class="text-sm text-gray-500 mb-5">
+        Permanently deletes your account and all associated training data. This cannot be undone.
+      </p>
+
+      <div id="delete-confirm" class="hidden mb-4 bg-gray-900 border border-red-800 rounded-lg p-4">
+        <p class="text-sm text-white mb-4">Are you sure? All your segment history and KOM data will be permanently deleted.</p>
+        <div class="flex gap-3">
+          <button
+            id="btn-delete-confirm"
+            class="text-sm bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            Yes, delete my account
+          </button>
+          <button
+            id="btn-delete-cancel"
+            class="text-sm text-gray-400 hover:text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <button
+        id="btn-delete-account"
+        class="text-sm text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 px-4 py-2 rounded-lg transition-colors"
+      >
+        Delete My Account
+      </button>
+      <p id="delete-error" class="hidden mt-3 text-sm text-red-400"></p>
     </section>
 
   </div>
@@ -137,6 +171,7 @@ import Layout from "../layouts/Layout.astro";
 
     document.getElementById("connected-section")?.classList.remove("hidden");
     document.getElementById("disconnected-section")?.classList.add("hidden");
+    document.getElementById("danger-zone")?.classList.remove("hidden");
 
     if (data.home_address) {
       (document.getElementById("home-address") as HTMLInputElement).value = data.home_address;
@@ -173,6 +208,35 @@ import Layout from "../layouts/Layout.astro";
       errEl.classList.remove("hidden");
       btn.disabled = false;
       btn.textContent = "Disconnect Strava";
+    }
+  });
+
+  // Delete account
+  document.getElementById("btn-delete-account")?.addEventListener("click", () => {
+    document.getElementById("delete-confirm")?.classList.remove("hidden");
+    (document.getElementById("btn-delete-account") as HTMLButtonElement).classList.add("hidden");
+  });
+
+  document.getElementById("btn-delete-cancel")?.addEventListener("click", () => {
+    document.getElementById("delete-confirm")?.classList.add("hidden");
+    (document.getElementById("btn-delete-account") as HTMLButtonElement).classList.remove("hidden");
+  });
+
+  document.getElementById("btn-delete-confirm")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-delete-confirm") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Deleting…";
+
+    const res = await apiFetch("/api/profile/account", { method: "DELETE" });
+    if (res.ok) {
+      localStorage.removeItem("tt_token");
+      window.location.href = "/";
+    } else {
+      const errEl = document.getElementById("delete-error") as HTMLElement;
+      errEl.textContent = "Failed to delete account. Try again.";
+      errEl.classList.remove("hidden");
+      btn.disabled = false;
+      btn.textContent = "Yes, delete my account";
     }
   });
 
