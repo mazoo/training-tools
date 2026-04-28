@@ -149,7 +149,11 @@ async def get_candidates(
         _build_candidate(profile, enrichment, home_lat, home_lng)
         for profile, enrichment in result.all()
     ]
-    candidates.sort(key=lambda c: (c.distance_from_home_km is None, c.distance_from_home_km or 0))
+    candidates.sort(key=lambda c: (
+        not c.is_kom,
+        c.distance_from_home_km is None,
+        c.distance_from_home_km or 0,
+    ))
 
     return CandidatesResponse(
         fetched_at=datetime.now(timezone.utc),

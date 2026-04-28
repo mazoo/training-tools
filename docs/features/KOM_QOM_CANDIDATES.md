@@ -9,7 +9,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 - As an athlete, I want to see which of my starred segments I have ever been in the top 10 or on the podium for, so I can prioritise realistic KOM/QOM targets.
 - As an athlete, I want to filter by effort time, gradient, indoor/outdoor, and podium-only, so I can match segments to a specific workout goal.
 - As an athlete, I want to see how many times I've ridden a segment and what average watts I've put out, so I can gauge my current form.
-- As an athlete, I want segments sorted by distance from home, so I can plan local efforts first.
+- As an athlete, I want KOM segments surfaced first, then the rest sorted by distance from home, so I can see what I already hold and plan local efforts next.
 - As an admin, I want to start the historical backfill from the page when Strava budget is safe, so I can fill missing segment-effort history without using the cron endpoint manually.
 
 ## API contract
@@ -172,7 +172,7 @@ Layout:
 ├──────────────────────┬──────────────────────────────────────┤
 │  FILTERS             │  [ Search segment name…            ] │
 │                      ├──────────────────────────────────────┤
-│  □ Podium only       │  SEGMENT LIST (sorted by dist.)      │
+│  □ Podium only       │  SEGMENT LIST (KOMs first, then dist)│
 │                      │                                      │
 │  Effort time         │  Col de la Croix              3.2km │
 │  [   ] – [   ] min   │      Best 14:07 · Last 15:01         │

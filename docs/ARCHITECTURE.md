@@ -97,7 +97,7 @@ GET /api/kom-qom/candidates
         │      surface                            → is_indoor
         │      podium_only                        → podium_seen = true
         │
-        └─ 4. Sort by distance_from_home ASC (nulls last), return JSON
+        └─ 4. Sort: KOMs first, then by distance_from_home ASC (nulls last), return JSON
 ```
 
 ## Caching / sync strategy

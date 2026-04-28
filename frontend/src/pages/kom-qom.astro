@@ -8,9 +8,13 @@ import Layout from "../layouts/Layout.astro";
     <aside class="w-64 shrink-0 bg-gray-900 border-r border-gray-800 p-5 flex flex-col gap-6">
       <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Filters</h2>
 
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input id="f-podium" type="checkbox" class="accent-sky-500 w-4 h-4" />
-        <span class="text-sm text-gray-300">Podium only (top 3)</span>
+      <label class="flex items-center justify-between cursor-pointer">
+        <span class="text-sm text-gray-300">KOM/QOM included</span>
+        <span class="relative inline-flex items-center">
+          <input id="f-kom-included" type="checkbox" class="sr-only peer" checked />
+          <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+          <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+        </span>
       </label>
 
       <div>
@@ -146,7 +150,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function rankBadge(c: any): string {
-    if (c.is_kom || c.best_seen_kom_rank === 1) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
+    if (c.is_kom) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
     if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">🥉 Podium</span>`;
     return `<span class="text-gray-500 text-xs">Top 10</span>`;
   }
@@ -196,21 +200,21 @@ import Layout from "../layouts/Layout.astro";
   let allCandidates: any[] = [];
 
   function getFilters() {
-    const podium = (document.getElementById("f-podium") as HTMLInputElement).checked;
+    const komIncluded = (document.getElementById("f-kom-included") as HTMLInputElement).checked;
     const timeMin = (document.getElementById("f-time-min") as HTMLInputElement).value;
     const timeMax = (document.getElementById("f-time-max") as HTMLInputElement).value;
     const gradMin = (document.getElementById("f-grad-min") as HTMLInputElement).value;
     const gradMax = (document.getElementById("f-grad-max") as HTMLInputElement).value;
     const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
     const search = (document.getElementById("f-search") as HTMLInputElement).value.trim().toLowerCase();
-    return { podium, timeMin, timeMax, gradMin, gradMax, surface, search };
+    return { komIncluded, timeMin, timeMax, gradMin, gradMax, surface, search };
   }
 
   function applyFilters() {
     const f = getFilters();
     const filtered = allCandidates.filter((c) => {
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
-      if (f.podium && !c.podium_seen) return false;
+      if (!f.komIncluded && c.is_kom) return false;
       if (f.timeMin && c.best_time_s != null && c.best_time_s < Number(f.timeMin) * 60) return false;
       if (f.timeMax && c.best_time_s != null && c.best_time_s > Number(f.timeMax) * 60) return false;
       if (f.gradMin && c.average_grade != null && c.average_grade < Number(f.gradMin)) return false;
@@ -414,7 +418,8 @@ import Layout from "../layouts/Layout.astro";
 
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
 
-  ["f-podium", "f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
+  document.getElementById("f-kom-included")?.addEventListener("change", applyFilters);
+  ["f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", applyFilters);
   });
   document.querySelectorAll('input[name="surface"]').forEach((el) => {
