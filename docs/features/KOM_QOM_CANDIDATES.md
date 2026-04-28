@@ -1,0 +1,231 @@
+# Feature: KOM/QOM Candidates
+
+## Goal
+
+Show the athlete a list of their starred Strava segments where they have historically appeared in the top 10 or on the podium, so they can identify realistic KOM/QOM targets. The primary signal — `top10_seen` / `podium_seen` — is derived from `kom_rank` on individual segment efforts inside detailed activities. This approach does not depend on the leaderboard endpoint (removed by Strava).
+
+## User stories
+
+- As an athlete, I want to see which of my starred segments I have ever been in the top 10 or on the podium for, so I can prioritise realistic KOM/QOM targets.
+- As an athlete, I want to filter by effort time, gradient, indoor/outdoor, and podium-only, so I can match segments to a specific workout goal.
+- As an athlete, I want to see how many times I've ridden a segment and what average watts I've put out, so I can gauge my current form.
+- As an athlete, I want segments sorted by distance from home, so I can plan local efforts first.
+
+## API contract
+
+### `GET /api/kom-qom/candidates`
+
+#### Query parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `effort_time_min` | integer (seconds) | — | Minimum best effort time |
+| `effort_time_max` | integer (seconds) | — | Maximum best effort time |
+| `gradient_min` | float (%) | — | Minimum average gradient |
+| `gradient_max` | float (%) | — | Maximum average gradient |
+| `surface` | `outdoor` \| `indoor` \| `all` | `all` | Filter by environment |
+| `podium_only` | boolean | `false` | If true, return only segments where `podium_seen = true` |
+
+#### Response `200 OK`
+
+```json
+{
+  "fetched_at": "2025-07-14T10:00:00Z",
+  "total": 12,
+  "candidates": [
+    {
+      "segment_id": 123456,
+      "segment_name": "Col de la Croix",
+      "top10_seen": true,
+      "podium_seen": true,
+      "best_seen_kom_rank": 2,
+      "last_seen_kom_rank": 3,
+      "best_time_s": 847,
+      "best_time_display": "14:07",
+      "latest_time_s": 901,
+      "latest_time_display": "15:01",
+      "times_ridden": 7,
+      "best_avg_watts": 328.5,
+      "latest_avg_watts": 310.2,
+      "last_ridden_at": "2025-06-01",
+      "kom_time_s": 820,
+      "kom_time_display": "13:40",
+      "gap_to_kom_s": 27,
+      "gap_to_kom_display": "0:27",
+      "average_grade": 7.8,
+      "distance_m": 4321,
+      "distance_from_home_km": 3.2,
+      "is_indoor": false,
+      "city": "Villars-sur-Ollon",
+      "country": "Switzerland",
+      "climb_category": 3,
+      "segment_url": "https://www.strava.com/segments/123456"
+    }
+  ]
+}
+```
+
+Notes:
+- `kom_time_s`, `gap_to_kom_s`, and their display variants may be `null` if `xoms` enrichment is unavailable.
+- `best_avg_watts` / `latest_avg_watts` may be `null` for athletes without a power meter.
+- `distance_from_home_km` may be `null` if `HOME_LAT`/`HOME_LNG` are not configured or `start_latlng` is absent.
+
+#### Response `429 Too Many Requests`
+
+```json
+{
+  "detail": "Strava rate limit reached",
+  "retry_after_s": 312
+}
+```
+
+### `POST /api/kom-qom/refresh`
+
+Triggers an incremental activity sync and segment enrichment pass.
+Returns `202 Accepted` immediately; runs in a background task.
+
+```json
+{ "task_id": "abc123", "message": "Refresh started" }
+```
+
+### `GET /api/kom-qom/refresh/{task_id}`
+
+Poll refresh progress.
+
+```json
+{
+  "status": "running",
+  "activities_processed": 18,
+  "activities_total": 25,
+  "strava_calls_made": 20,
+  "strava_budget_remaining_15min": 180
+}
+```
+
+## Frontend components (Astro)
+
+### Page: `src/pages/kom-qom.astro`
+
+Server-rendered shell with a client-side island for the interactive filter+list panel.
+
+Layout:
+```
+┌─────────────────────────────────────────────────────────────┐
+│  KOM / QOM Candidates                        [Refresh data] │
+├──────────────────────┬──────────────────────────────────────┤
+│  FILTERS             │  SEGMENT LIST (sorted by dist.)      │
+│                      │                                      │
+│  □ Podium only       │  Col de la Croix              3.2km │
+│                      │      Best 14:07 · Last 15:01         │
+│  Effort time         │      Rank: #2 seen · 328W · 7×      │
+│  [   ] – [   ] min   │      Gap to KOM: 0:27 ·  +7.8%      │
+│                      │                                      │
+│  Gradient            │  Kleine Scheidegg             5.1km │
+│  [   ] – [   ] %     │      ...                            │
+│                      │                                      │
+│  Surface             │  ...                                 │
+│  ○ All  ○ Out  ○ In  │                                      │
+└──────────────────────┴──────────────────────────────────────┘
+```
+
+### Component: `SegmentCard.astro`
+
+Displays one candidate. Shows:
+- Rank badge: star icon if `best_seen_kom_rank == 1` (held KOM), podium badge if `podium_seen`, top-10 badge otherwise
+- Segment name + Strava link
+- Distance from home (km)
+- Best time vs latest time; gap to KOM (if available)
+- Best watts / latest watts (if available)
+- Times ridden + last ridden date
+- Average grade + total distance
+- City/country
+
+### Component: `FilterPanel` (interactive island)
+
+Filters are applied client-side — all candidates are fetched once on page load. No extra API call on filter change.
+
+## Business logic
+
+### Candidate inclusion rule
+
+A segment is a candidate if, in `athlete_segment_profile`:
+1. `is_starred = true`
+2. `top10_seen = true` (or `podium_seen = true` if `podium_only` filter is active)
+
+### Building `top10_seen` / `podium_seen`
+
+When processing `segment_efforts` from a detailed activity:
+
+```python
+for effort in activity["segment_efforts"]:
+    rank = effort.get("kom_rank")       # int 1–10 or None
+    upsert_effort_digest(effort)
+    if rank is not None:
+        profile.top10_seen = True
+        if rank <= 3:
+            profile.podium_seen = True
+        profile.best_seen_kom_rank = min(profile.best_seen_kom_rank or 99, rank)
+        profile.last_seen_kom_rank = rank
+```
+
+### Aggregating `times_ridden` and watts
+
+```python
+profile.times_ridden = COUNT(effort_id) WHERE segment_id = x AND athlete_id = y
+profile.best_time_s  = MIN(elapsed_s)   WHERE segment_id = x AND athlete_id = y
+profile.best_avg_watts = MAX(avg_watts) WHERE segment_id = x AND athlete_id = y AND avg_watts IS NOT NULL
+```
+
+Latest values come from the effort with the most recent `effort_date`.
+
+### Gap to KOM (enrichment, may be null)
+
+```python
+# Only if xoms.kom is present in GET /segments/{id} response
+kom_time_s = xom_to_seconds(segment["xoms"]["kom"])
+gap_to_kom_s = profile.best_time_s - kom_time_s  # 0 if athlete holds KOM
+```
+
+If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null` and the frontend omits the gap row on the card.
+
+### Distance from home (Haversine)
+
+```python
+from math import radians, sin, cos, sqrt, atan2
+
+def haversine_km(lat1, lon1, lat2, lon2) -> float:
+    R = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+```
+
+Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` and `HOME_LAT`/`HOME_LNG` from config. Not stored — home location can change without requiring a DB update pass.
+
+### Indoor detection (priority order)
+
+1. `segment.start_latlng == [0.0, 0.0]` or null → indoor
+2. Segment name matches `(?i)(zwift|virtual|indoor|trainer)` → indoor
+3. Default → outdoor
+
+## Refresh strategy
+
+1. On first load (cold DB), endpoint triggers a bounded bootstrap automatically:
+   - Sync starred segments
+   - Fetch last N activities (configurable, default 200) and extract segment efforts
+2. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
+3. Subsequent loads read from local DB with no Strava calls.
+4. Manual refresh fetches activities newer than the last sync timestamp only.
+
+## Edge cases
+
+| Case | Handling |
+|------|---------|
+| `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment excluded from candidates |
+| Athlete has efforts but no power meter | `best_avg_watts = null`; card omits watts row |
+| `xoms` absent from segment detail | `kom_time_s = null`; gap row omitted from card |
+| Segment deleted from Strava | 404 from `GET /segments/{id}` → skip enrichment, retain profile from effort history |
+| `start_latlng` null | `distance_from_home_km = null`; sort these last |
+| `HOME_LAT`/`HOME_LNG` not set | `distance_from_home_km = null` for all; disable distance sort, warn in UI |
+| Activity deleted on Strava | Remove corresponding `segment_effort_digest` rows; recompute affected profiles |

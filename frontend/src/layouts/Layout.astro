@@ -1,0 +1,71 @@
+---
+export interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="h-full bg-gray-950 text-gray-100">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} — Training Tools</title>
+    <link rel="stylesheet" href="/src/styles/global.css" />
+  </head>
+  <body class="h-full flex flex-col">
+    <nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-6">
+      <a href="/" class="text-white font-semibold text-lg tracking-tight">Training Tools</a>
+      <a href="/kom-qom" class="text-gray-400 hover:text-white text-sm transition-colors">
+        KOM / QOM Candidates
+      </a>
+      <div class="ml-auto flex items-center gap-4">
+        <a id="nav-athlete" href="/profile" class="hidden text-sm text-gray-300 hover:text-white transition-colors"></a>
+        <a href="/auth/login" id="nav-login" class="hidden text-sm text-strava hover:text-orange-400 transition-colors">
+          Connect Strava
+        </a>
+      </div>
+    </nav>
+    <main class="flex-1 overflow-auto">
+      <slot />
+    </main>
+  </body>
+
+  <script>
+    // Persist token from OAuth redirect and keep nav in sync
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    if (token) {
+      localStorage.setItem("tt_token", token);
+      params.delete("token");
+      const clean = params.toString()
+        ? `${window.location.pathname}?${params}`
+        : window.location.pathname;
+      history.replaceState({}, "", clean);
+    }
+
+    async function initNav() {
+      const stored = localStorage.getItem("tt_token");
+      if (!stored) {
+        document.getElementById("nav-login")?.classList.remove("hidden");
+        return;
+      }
+      try {
+        const res = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${stored}` },
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const el = document.getElementById("nav-athlete");
+        if (el) {
+          el.textContent = `${data.firstname} ${data.lastname}`;
+          el.classList.remove("hidden");
+        }
+      } catch {
+        document.getElementById("nav-login")?.classList.remove("hidden");
+      }
+    }
+
+    initNav();
+  </script>
+</html>

@@ -1,0 +1,307 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="KOM / QOM Candidates">
+  <div class="flex h-full">
+    <!-- Filter sidebar -->
+    <aside class="w-64 shrink-0 bg-gray-900 border-r border-gray-800 p-5 flex flex-col gap-6">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Filters</h2>
+
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input id="f-podium" type="checkbox" class="accent-strava w-4 h-4" />
+        <span class="text-sm text-gray-300">Podium only (top 3)</span>
+      </label>
+
+      <div>
+        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Effort time (min)</p>
+        <div class="flex items-center gap-2">
+          <input
+            id="f-time-min"
+            type="number"
+            min="0"
+            placeholder="Min"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          />
+          <span class="text-gray-600">–</span>
+          <input
+            id="f-time-max"
+            type="number"
+            min="0"
+            placeholder="Max"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          />
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Average gradient (%)</p>
+        <div class="flex items-center gap-2">
+          <input
+            id="f-grad-min"
+            type="number"
+            step="0.1"
+            placeholder="Min"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          />
+          <span class="text-gray-600">–</span>
+          <input
+            id="f-grad-max"
+            type="number"
+            step="0.1"
+            placeholder="Max"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          />
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Surface</p>
+        <div class="flex flex-col gap-1">
+          {["all", "outdoor", "indoor"].map((val) => (
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="surface"
+                value={val}
+                checked={val === "all"}
+                class="accent-strava"
+              />
+              <span class="text-sm text-gray-300 capitalize">{val}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <button
+        id="btn-refresh"
+        class="mt-auto text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 transition-colors"
+      >
+        Refresh data
+      </button>
+    </aside>
+
+    <!-- Main content -->
+    <div class="flex-1 overflow-auto px-6 py-5">
+      <!-- Status bar -->
+      <div id="status-bar" class="hidden mb-4 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-400">
+        <span id="status-text">Syncing…</span>
+        <div class="mt-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+          <div id="status-progress" class="h-full bg-strava rounded-full transition-all" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Empty / loading states -->
+      <div id="state-loading" class="text-gray-500 text-sm py-8 text-center">Loading…</div>
+      <div id="state-empty" class="hidden text-gray-500 text-sm py-8 text-center">
+        No candidates yet.<br />Hit <strong class="text-gray-400">Refresh data</strong> to sync your Strava history.
+      </div>
+      <div id="state-unauthenticated" class="hidden text-gray-500 text-sm py-8 text-center">
+        <a href="/auth/login" class="text-strava hover:text-orange-400">Connect Strava</a> to see your candidates.
+      </div>
+
+      <!-- Candidate list -->
+      <div id="candidate-list" class="hidden grid gap-3"></div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  function token(): string | null {
+    return localStorage.getItem("tt_token");
+  }
+
+  function authHeaders(): HeadersInit {
+    return { Authorization: `Bearer ${token()}` };
+  }
+
+  function show(id: string) {
+    document.getElementById(id)?.classList.remove("hidden");
+  }
+  function hide(id: string) {
+    document.getElementById(id)?.classList.add("hidden");
+  }
+
+  function rankBadge(c: any): string {
+    if (c.best_seen_kom_rank === 1) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
+    if (c.podium_seen) return `<span class="text-orange-400 font-bold text-xs">🥉 Podium</span>`;
+    return `<span class="text-gray-500 text-xs">Top 10</span>`;
+  }
+
+  function card(c: any): string {
+    const dist = c.distance_from_home_km != null ? `${c.distance_from_home_km} km` : "—";
+    const grade = c.average_grade != null ? `${c.average_grade.toFixed(1)}%` : "—";
+    const distSeg = c.distance_m != null ? `${(c.distance_m / 1000).toFixed(1)} km` : "—";
+    const gap =
+      c.gap_to_kom_s != null
+        ? `Gap to KOM: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`
+        : "";
+    const watts =
+      c.best_avg_watts != null
+        ? `${Math.round(c.best_avg_watts)}W best · ${c.latest_avg_watts != null ? Math.round(c.latest_avg_watts) + "W last" : ""}`
+        : "";
+    const location = [c.city, c.country].filter(Boolean).join(", ");
+
+    return `
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-colors">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-center gap-2 min-w-0">
+            ${rankBadge(c)}
+            <a href="${c.segment_url}" target="_blank" rel="noopener"
+               class="text-white font-medium hover:text-orange-400 transition-colors truncate">
+              ${c.segment_name}
+            </a>
+          </div>
+          <span class="text-gray-500 text-sm shrink-0">${dist} from home</span>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
+          <span>Best <strong class="text-gray-200">${c.best_time_display ?? "—"}</strong></span>
+          <span>Last <strong class="text-gray-200">${c.latest_time_display ?? "—"}</strong></span>
+          <span>${c.times_ridden}× ridden</span>
+          ${watts ? `<span>${watts}</span>` : ""}
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
+          <span>${grade} avg · ${distSeg}</span>
+          ${gap ? `<span class="text-orange-400">${gap}</span>` : ""}
+          ${location ? `<span>${location}</span>` : ""}
+        </div>
+      </div>`;
+  }
+
+  // ── state ─────────────────────────────────────────────────────────────────
+
+  let allCandidates: any[] = [];
+
+  function getFilters() {
+    const podium = (document.getElementById("f-podium") as HTMLInputElement).checked;
+    const timeMin = (document.getElementById("f-time-min") as HTMLInputElement).value;
+    const timeMax = (document.getElementById("f-time-max") as HTMLInputElement).value;
+    const gradMin = (document.getElementById("f-grad-min") as HTMLInputElement).value;
+    const gradMax = (document.getElementById("f-grad-max") as HTMLInputElement).value;
+    const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
+    return { podium, timeMin, timeMax, gradMin, gradMax, surface };
+  }
+
+  function applyFilters() {
+    const f = getFilters();
+    const filtered = allCandidates.filter((c) => {
+      if (f.podium && !c.podium_seen) return false;
+      if (f.timeMin && c.best_time_s != null && c.best_time_s < Number(f.timeMin) * 60) return false;
+      if (f.timeMax && c.best_time_s != null && c.best_time_s > Number(f.timeMax) * 60) return false;
+      if (f.gradMin && c.average_grade != null && c.average_grade < Number(f.gradMin)) return false;
+      if (f.gradMax && c.average_grade != null && c.average_grade > Number(f.gradMax)) return false;
+      if (f.surface === "outdoor" && c.is_indoor) return false;
+      if (f.surface === "indoor" && !c.is_indoor) return false;
+      return true;
+    });
+
+    const list = document.getElementById("candidate-list")!;
+    if (filtered.length === 0) {
+      hide("candidate-list");
+      show("state-empty");
+    } else {
+      list.innerHTML = filtered.map(card).join("");
+      hide("state-empty");
+      show("candidate-list");
+    }
+  }
+
+  // ── data fetching ─────────────────────────────────────────────────────────
+
+  async function loadCandidates() {
+    hide("state-loading");
+    hide("state-empty");
+    hide("state-unauthenticated");
+    hide("candidate-list");
+    show("state-loading");
+
+    const t = token();
+    if (!t) {
+      hide("state-loading");
+      show("state-unauthenticated");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/kom-qom/candidates", { headers: authHeaders() });
+      if (res.status === 401) {
+        hide("state-loading");
+        show("state-unauthenticated");
+        return;
+      }
+      const data = await res.json();
+      allCandidates = data.candidates ?? [];
+      hide("state-loading");
+      applyFilters();
+    } catch {
+      hide("state-loading");
+      show("state-empty");
+    }
+  }
+
+  async function triggerRefresh() {
+    const btn = document.getElementById("btn-refresh") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+
+    const res = await fetch("/api/kom-qom/refresh", {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      btn.disabled = false;
+      btn.textContent = "Refresh data";
+      return;
+    }
+    const { task_id } = await res.json();
+
+    show("status-bar");
+    const statusText = document.getElementById("status-text")!;
+    const progressBar = document.getElementById("status-progress")!;
+
+    const poll = setInterval(async () => {
+      const sr = await fetch(`/api/kom-qom/refresh/${task_id}`, { headers: authHeaders() });
+      const s = await sr.json();
+      const pct = s.activities_total > 0
+        ? Math.round((s.activities_processed / s.activities_total) * 100)
+        : 0;
+      progressBar.style.width = `${pct}%`;
+      const budget = s.strava_budget_remaining_15min != null
+        ? ` · ${s.strava_budget_remaining_15min} API calls left`
+        : "";
+      statusText.textContent = `Synced ${s.activities_processed} / ${s.activities_total} activities (${s.strava_calls_made} API calls${budget})`;
+
+      if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
+        clearInterval(poll);
+        hide("status-bar");
+        btn.disabled = false;
+
+        if (s.status === "rate_limited") {
+          const retryMin = s.retry_after
+            ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
+            : 15;
+          btn.textContent = `Rate limited — retry in ~${retryMin}m`;
+          setTimeout(() => { btn.textContent = "Refresh data"; }, retryMin * 60 * 1000);
+        } else {
+          btn.textContent = "Refresh data";
+          if (s.status === "done") loadCandidates();
+        }
+      }
+    }, 3000);
+  }
+
+  // ── wire up ───────────────────────────────────────────────────────────────
+
+  document.getElementById("btn-refresh")?.addEventListener("click", triggerRefresh);
+
+  ["f-podium", "f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", applyFilters);
+  });
+  document.querySelectorAll('input[name="surface"]').forEach((el) => {
+    el.addEventListener("change", applyFilters);
+  });
+
+  loadCandidates();
+</script>

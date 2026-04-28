@@ -1,0 +1,219 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Profile">
+  <div class="max-w-xl mx-auto px-6 py-12">
+
+    <!-- Athlete header -->
+    <div class="flex items-center gap-5 mb-10">
+      <img
+        id="profile-avatar"
+        src=""
+        alt=""
+        class="w-16 h-16 rounded-full bg-gray-800 hidden object-cover"
+      />
+      <div id="profile-avatar-placeholder" class="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center text-gray-500 text-2xl">
+        ?
+      </div>
+      <h1 id="profile-name" class="text-2xl font-bold text-white">—</h1>
+    </div>
+
+    <!-- Strava connection card -->
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+      <h2 class="text-base font-semibold text-white mb-4">Strava Connection</h2>
+
+      <div id="connected-section" class="hidden">
+        <div class="flex items-center gap-3 mb-5">
+          <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+          <span class="text-sm text-gray-300">Connected</span>
+        </div>
+        <button
+          id="btn-disconnect"
+          class="text-sm text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 px-4 py-2 rounded-lg transition-colors"
+        >
+          Disconnect Strava
+        </button>
+        <p id="disconnect-error" class="hidden mt-3 text-sm text-red-400"></p>
+      </div>
+
+      <div id="disconnected-section" class="hidden">
+        <div class="flex items-center gap-3 mb-5">
+          <span class="w-2 h-2 rounded-full bg-gray-600 shrink-0"></span>
+          <span class="text-sm text-gray-400">Not connected</span>
+        </div>
+        <a
+          href="/auth/login"
+          class="inline-block bg-strava text-white text-sm px-5 py-2 rounded-lg font-medium hover:bg-orange-500 transition-colors"
+        >
+          Connect with Strava
+        </a>
+      </div>
+    </section>
+
+    <!-- Home location card -->
+    <section class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 class="text-base font-semibold text-white mb-1">Home Location</h2>
+      <p class="text-sm text-gray-500 mb-5">
+        Used to sort KOM / QOM candidates by distance from home.
+      </p>
+
+      <form id="home-form" class="space-y-4">
+        <label class="block">
+          <span class="text-xs text-gray-400 uppercase tracking-wide mb-1.5 block">Address</span>
+          <input
+            id="home-address"
+            type="text"
+            autocomplete="street-address"
+            placeholder="Fegetzhofweg 36, Solothurn"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          />
+        </label>
+
+        <p id="home-coords" class="text-xs text-gray-600 hidden"></p>
+
+        <div class="flex items-center gap-3 flex-wrap">
+          <button
+            type="submit"
+            id="btn-save-home"
+            class="text-sm bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+          >
+            Save
+          </button>
+          <span id="home-feedback" class="text-sm"></span>
+        </div>
+      </form>
+    </section>
+
+  </div>
+</Layout>
+
+<script>
+  const token = localStorage.getItem("tt_token");
+
+  async function apiFetch(path: string, opts: RequestInit = {}) {
+    return fetch(path, {
+      ...opts,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(opts.headers ?? {}),
+      },
+    });
+  }
+
+  async function init() {
+    if (!token) {
+      showDisconnected();
+      return;
+    }
+    const res = await apiFetch("/api/auth/me");
+    if (!res.ok) {
+      showDisconnected();
+      return;
+    }
+    const data = await res.json();
+    showConnected(data);
+  }
+
+  function showConnected(data: {
+    firstname?: string | null;
+    lastname?: string | null;
+    profile?: string | null;
+    home_address?: string | null;
+    home_lat?: number | null;
+    home_lng?: number | null;
+  }) {
+    const name = [data.firstname, data.lastname].filter(Boolean).join(" ") || "Athlete";
+    (document.getElementById("profile-name") as HTMLElement).textContent = name;
+
+    if (data.profile) {
+      const img = document.getElementById("profile-avatar") as HTMLImageElement;
+      img.src = data.profile;
+      img.alt = name;
+      img.classList.remove("hidden");
+      document.getElementById("profile-avatar-placeholder")?.classList.add("hidden");
+    }
+
+    document.getElementById("connected-section")?.classList.remove("hidden");
+    document.getElementById("disconnected-section")?.classList.add("hidden");
+
+    if (data.home_address) {
+      (document.getElementById("home-address") as HTMLInputElement).value = data.home_address;
+    }
+    if (data.home_lat != null && data.home_lng != null) {
+      const coordsEl = document.getElementById("home-coords") as HTMLElement;
+      coordsEl.textContent = `${data.home_lat.toFixed(5)}, ${data.home_lng.toFixed(5)}`;
+      coordsEl.classList.remove("hidden");
+    }
+  }
+
+  function showDisconnected() {
+    (document.getElementById("profile-name") as HTMLElement).textContent = "Not connected";
+    document.getElementById("disconnected-section")?.classList.remove("hidden");
+    document.getElementById("connected-section")?.classList.add("hidden");
+    const form = document.getElementById("home-form") as HTMLFormElement;
+    form.style.opacity = "0.4";
+    form.style.pointerEvents = "none";
+  }
+
+  // Disconnect
+  document.getElementById("btn-disconnect")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-disconnect") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Disconnecting…";
+
+    const res = await apiFetch("/api/profile/disconnect", { method: "POST" });
+    if (res.ok) {
+      localStorage.removeItem("tt_token");
+      window.location.href = "/";
+    } else {
+      const errEl = document.getElementById("disconnect-error") as HTMLElement;
+      errEl.textContent = "Failed to disconnect. Try again.";
+      errEl.classList.remove("hidden");
+      btn.disabled = false;
+      btn.textContent = "Disconnect Strava";
+    }
+  });
+
+  // Save home address
+  document.getElementById("home-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const address = (document.getElementById("home-address") as HTMLInputElement).value.trim();
+    const feedback = document.getElementById("home-feedback") as HTMLElement;
+    const btn = document.getElementById("btn-save-home") as HTMLButtonElement;
+
+    if (!address) {
+      feedback.textContent = "Please enter an address.";
+      feedback.className = "text-sm text-red-400";
+      return;
+    }
+
+    btn.disabled = true;
+    feedback.textContent = "Geocoding…";
+    feedback.className = "text-sm text-gray-400";
+
+    const res = await apiFetch("/api/profile/home", {
+      method: "PUT",
+      body: JSON.stringify({ address }),
+    });
+
+    btn.disabled = false;
+
+    if (res.ok) {
+      const data = await res.json();
+      const coordsEl = document.getElementById("home-coords") as HTMLElement;
+      coordsEl.textContent = `${(data.home_lat as number).toFixed(5)}, ${(data.home_lng as number).toFixed(5)}`;
+      coordsEl.classList.remove("hidden");
+      feedback.textContent = "Saved.";
+      feedback.className = "text-sm text-green-400";
+      setTimeout(() => { feedback.textContent = ""; }, 2000);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      feedback.textContent = (body as { detail?: string }).detail ?? "Failed to save. Try again.";
+      feedback.className = "text-sm text-red-400";
+    }
+  });
+
+  init();
+</script>
