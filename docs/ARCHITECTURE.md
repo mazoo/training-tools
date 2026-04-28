@@ -31,7 +31,7 @@ Recent/manual sync imports efforts from `GET /activities/{id}?include_all_effort
 
 **Layer 2 — Segment enrichment (optional)**
 
-`GET /segments/{id}` provides geometry (`start_latlng`, `avg_grade_pct`), city/country, and potentially `xoms.kom` (KOM time string). `xoms` availability is uncertain — treat `kom_time_s` and the gap-to-KOM as best-effort enrichment that may be null. The candidate list is fully functional without it.
+Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. `kom_time_s` (from `xoms.kom`) is not currently populated — `GET /segments/{id}` is not called during refresh to keep Strava budget low. Treat `kom_time_s` and the gap-to-KOM as unavailable for now; the candidate list is fully functional without them.
 
 `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s` in the service layer. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
 
@@ -43,17 +43,23 @@ Recent/manual sync imports efforts from `GET /activities/{id}?include_all_effort
 1. Sync starred segments  (GET /athlete/segments/starred, paginated)
    └─ upsert geometry/grade/elevation/activity_type into segment_enrichment
       upsert is_kom/pr_time_s/starred_date into athlete_segment_profile
+      set bootstrap_done = true, last_activity_sync_at = now
 
-2. Sync recent activities  (GET /athlete/activities, bounded window)
-   └─ for each activity: GET /activities/{id}
+   No activity fetch on bootstrap — effort history comes from the backfill.
+```
+
+### Incremental refresh ("Refresh data" button)
+
+```
+1. Sync starred segments  (GET /athlete/segments/starred)
+   └─ same upsert as bootstrap
+
+2. Fetch new activities   (GET /athlete/activities?after=last_activity_sync_at)
+   └─ for each activity: GET /activities/{id}?include_all_efforts=true
       └─ extract segment_efforts[]
          → insert into segment_effort_digest
          → recompute athlete_segment_profile (times_ridden, best_time_s,
            best_avg_watts, top10_seen, podium_seen, best_seen_kom_rank)
-
-3. Enrichment (background, rate-limited)
-   └─ for starred segments only: GET /segments/{id}
-      → store geometry + optional xoms data in segment_enrichment
 ```
 
 ### Historical backfill
@@ -102,13 +108,16 @@ GET /api/kom-qom/candidates
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
 | Starred segment efforts | `GET /segment_efforts` | Daily historical backfill; one broad call per starred segment in the normal case | — |
-| Segment enrichment | `GET /segments/{id}` | Stale after **7 days**; starred segments only | 7 days |
 
-On a full cold-start for an athlete with 100 starred segments and 200 recent activities:
+On a full cold-start for an athlete with 100 starred segments:
+
+- 1 call: starred segments (bootstrap complete; backfill runs separately)
+
+On a typical incremental refresh with 3 new activities since last sync:
 
 - 1 call: starred segments
-- ~200 calls: activity details (spread over multiple 15-min windows as needed)
-- up to 100 calls: segment enrichment (background, non-blocking)
+- 1 call: activity list
+- 3 calls: activity details
 
 Historical backfill then proceeds separately. In the normal case it uses one `GET /segment_efforts` call per starred segment over the 365-day lookback; dense segments that hit the `per_page=200` cap are split into smaller date windows.
 
@@ -229,7 +238,7 @@ CREATE TABLE athlete_segment_profile (
 
 -- Segment metadata shared across athletes.
 -- Geometry/grade/elevation populated from GET /segments/starred on every sync (no TTL).
--- kom_time_s and cached_at populated from GET /segments/{id}, TTL = 7 days.
+-- kom_time_s is not currently populated (GET /segments/{id} not called; kept null to save budget).
 -- gap_to_kom_s is NOT stored — computed at query time as best_time_s - kom_time_s.
 CREATE TABLE segment_enrichment (
     segment_id              INTEGER PRIMARY KEY,

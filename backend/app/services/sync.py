@@ -16,19 +16,17 @@ from app.models.segment import (
 from app.strava.client import StravaClient, StravaRateLimitError
 from app.strava.rate_limiter import rate_limiter
 from app.tasks import TaskStatus, create_task
-from app.utils import is_segment_indoor, xom_to_seconds
+from app.utils import is_segment_indoor
 
 logger = logging.getLogger(__name__)
 
-_INITIAL_DAYS = 30          # days fetched on first connect (fast path)
-_BACKFILL_TOTAL_DAYS = 365  # how far back to go in total
+_FULL_REFRESH_DAYS = 30     # lookback window used when full=True is requested
 _MAX_PAGES = 5
-_KOM_TIME_TTL_DAYS = 7
 _SEGMENT_EFFORTS_PER_PAGE = 200
-_MIN_SEGMENT_EFFORT_WINDOW = timedelta(hours=1)
 # Stop a backfill run if fewer than this many daily calls remain — leaves
 # headroom for ongoing syncs and starred-segment enrichment.
 MIN_DAILY_BACKFILL_BUDGET = 150
+_MAX_SEGMENTS_PER_BACKFILL_RUN = 75
 
 
 def _now() -> datetime:
@@ -54,16 +52,20 @@ async def run_sync(
     full: bool = False,
 ) -> None:
     """
-    User-triggered sync. On a cold DB fetches the last _INITIAL_DAYS days only,
-    giving candidates quickly without burning the full budget. Subsequent calls
-    fetch only activities newer than the last sync timestamp.
+    User-triggered sync.
 
-    Request order:
-      1. GET /segments/starred          — 1 call
-      2. GET /athlete/activities        — 1–5 calls (recent window)
-      3. GET /activities/{id}           — 1 per activity; segment metadata is free here
-      4. Profile recomputation          — local, 0 calls
-      5. GET /segments/{id}             — starred only, deferred, non-fatal if rate-limited
+    Bootstrap (first connect): syncs starred segments only (1 call). Effort
+    history is populated separately by the backfill via GET /segment_efforts.
+
+    Incremental (subsequent calls): syncs starred segments + activities newer
+    than last_activity_sync_at, so today's rides appear without waiting for
+    the next backfill run.
+
+    Request order (incremental):
+      1. GET /segments/starred   — 1 call (geometry + PR data free)
+      2. GET /athlete/activities — 1–5 calls
+      3. GET /activities/{id}    — 1 per new activity
+      4. Profile recomputation   — local, 0 calls
     """
     try:
         client = StravaClient(access_token)
@@ -75,23 +77,21 @@ async def run_sync(
         starred_ids = {s["id"] for s in starred}
         await _update_starred_flags(db, athlete_id, starred)
 
-        after_ts = await _compute_after_ts(db, athlete_id, full)
-        activities = await _fetch_activities(client, after_ts=after_ts, task=task)
-        task.activities_total = len(activities)
-        logger.info("athlete=%d fetched %d activities to process", athlete_id, len(activities))
+        sync_state = await _get_sync_state(db, athlete_id)
+        if sync_state and sync_state.bootstrap_done:
+            after_ts = _compute_after_ts(sync_state, full)
+            activities = await _fetch_activities(client, after_ts=after_ts, task=task)
+            task.activities_total = len(activities)
+            logger.info("athlete=%d fetched %d activities to process", athlete_id, len(activities))
+            touched = await _fetch_activity_details(db, client, athlete_id, activities, task)
+            for segment_id in touched:
+                await _recompute_profile(db, athlete_id, segment_id, starred_ids)
+        else:
+            logger.info("athlete=%d bootstrap: skipping activity fetch; backfill will cover history", athlete_id)
 
-        touched = await _fetch_activity_details(db, client, athlete_id, activities, task)
-        for segment_id in touched:
-            await _recompute_profile(db, athlete_id, segment_id, starred_ids)
-
-        await _upsert_sync_state(db, athlete_id, after_ts=after_ts)
+        await _upsert_sync_state(db, athlete_id)
         if task.status == "running":
             task.status = "done"
-
-        try:
-            await _fetch_kom_times(db, client, athlete_id, starred, task)
-        except StravaRateLimitError:
-            logger.info("athlete=%d rate limited during KOM enrichment — will retry next sync", athlete_id)
 
     except StravaRateLimitError as exc:
         logger.warning("athlete=%d rate limited during core sync", athlete_id)
@@ -103,6 +103,29 @@ async def run_sync(
         task.error = str(exc)
 
 
+async def _backfill_one_segment(
+    db: AsyncSession,
+    client: StravaClient,
+    athlete_id: int,
+    segment_id: int,
+    starred_ids: set[int],
+    task: TaskStatus,
+) -> None:
+    try:
+        await _mark_segment_effort_backfill_attempt(db, athlete_id, segment_id)
+        touched = await _fetch_segment_efforts_paged(db, client, athlete_id, segment_id, task)
+        for touched_segment_id in touched:
+            await _recompute_profile(db, athlete_id, touched_segment_id, starred_ids)
+        await _mark_segment_effort_backfill_done(db, athlete_id, segment_id)
+    except StravaRateLimitError:
+        raise
+    except Exception as exc:
+        logger.warning("athlete=%d failed segment-effort backfill for segment=%d", athlete_id, segment_id)
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code in {400, 403, 404}:
+            await _mark_segment_effort_backfill_skipped(db, athlete_id, segment_id, str(exc))
+
+
 async def run_backfill_chunk(
     db: AsyncSession,
     athlete_id: int,
@@ -110,12 +133,8 @@ async def run_backfill_chunk(
     task: TaskStatus,
 ) -> None:
     """
-    Extend this athlete's starred-segment effort history.
-
-    The historical path is segment-centric: one broad segment_efforts request per
-    starred segment usually returns every effort in the configured lookback
-    window. If a window returns exactly the page cap, it is split and retried in
-    smaller windows so dense segments do not silently truncate.
+    Fetch up to _MAX_SEGMENTS_PER_BACKFILL_RUN pending starred segments using
+    GET /segment_efforts (no date filter, per_page=200, paginated).
 
     Called by run_daily_backfill; also callable directly for testing.
     No-ops if initial sync hasn't run yet or backfill is already complete.
@@ -129,45 +148,23 @@ async def run_backfill_chunk(
         client = StravaClient(access_token)
         task.status = "running"
 
-        window_end = _now()
-        window_start = window_end - timedelta(days=_BACKFILL_TOTAL_DAYS)
         starred_ids = await _get_starred_ids(db, athlete_id)
-        segment_ids = await _get_pending_segment_effort_backfill_ids(db, athlete_id)
+        segment_ids = (await _get_pending_segment_effort_backfill_ids(db, athlete_id))[:_MAX_SEGMENTS_PER_BACKFILL_RUN]
         task.activities_total = len(segment_ids)
 
         if not segment_ids:
-            await _mark_backfill_complete(db, athlete_id, window_start)
+            await _mark_backfill_complete(db, athlete_id)
             task.status = "done"
             return
 
-        logger.info(
-            "athlete=%d segment-effort backfill: %d starred segments, %s → %s",
-            athlete_id, len(segment_ids), window_start.date(), window_end.date(),
-        )
+        logger.info("athlete=%d segment-effort backfill: %d segments", athlete_id, len(segment_ids))
 
         for i, segment_id in enumerate(segment_ids):
-            try:
-                await _mark_segment_effort_backfill_attempt(db, athlete_id, segment_id)
-                touched = await _fetch_segment_effort_window(
-                    db, client, athlete_id, segment_id, window_start, window_end, task
-                )
-                for touched_segment_id in touched:
-                    await _recompute_profile(db, athlete_id, touched_segment_id, starred_ids)
-                await _mark_segment_effort_backfill_done(db, athlete_id, segment_id)
-            except StravaRateLimitError:
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "athlete=%d failed segment-effort backfill for segment=%d",
-                    athlete_id, segment_id,
-                )
-                status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if status_code in {400, 403, 404}:
-                    await _mark_segment_effort_backfill_skipped(db, athlete_id, segment_id, str(exc))
+            await _backfill_one_segment(db, client, athlete_id, segment_id, starred_ids, task)
             task.activities_processed = i + 1
 
         if not await _get_pending_segment_effort_backfill_ids(db, athlete_id):
-            await _mark_backfill_complete(db, athlete_id, window_start)
+            await _mark_backfill_complete(db, athlete_id)
         task.status = "done"
 
     except StravaRateLimitError as exc:
@@ -225,14 +222,11 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
 
 # ── orchestration helpers ──────────────────────────────────────────────────────
 
-async def _compute_after_ts(db: AsyncSession, athlete_id: int, full: bool) -> int:
-    sync_state = await _get_sync_state(db, athlete_id)
-    default_cutoff = int((_now() - timedelta(days=_INITIAL_DAYS)).timestamp())
-    if full or not sync_state or not sync_state.bootstrap_done:
-        return default_cutoff
-    if sync_state.last_activity_sync_at:
-        return int(sync_state.last_activity_sync_at.timestamp())
-    return default_cutoff
+def _compute_after_ts(sync_state: AthleteSyncState, full: bool) -> int:
+    fallback = int((_now() - timedelta(days=_FULL_REFRESH_DAYS)).timestamp())
+    if full or not sync_state.last_activity_sync_at:
+        return fallback
+    return int(sync_state.last_activity_sync_at.timestamp())
 
 
 async def _fetch_activities(
@@ -275,93 +269,23 @@ async def _fetch_activity_details(
     return touched
 
 
-def _strava_local_datetime(dt: datetime) -> str:
-    return dt.isoformat()
-
-
-async def _fetch_segment_effort_window(
+async def _fetch_segment_efforts_paged(
     db: AsyncSession,
     client: StravaClient,
     athlete_id: int,
     segment_id: int,
-    window_start: datetime,
-    window_end: datetime,
     task: TaskStatus,
 ) -> set[int]:
-    efforts = await client.get_segment_efforts(
-        segment_id=segment_id,
-        start_date_local=_strava_local_datetime(window_start),
-        end_date_local=_strava_local_datetime(window_end),
-        per_page=_SEGMENT_EFFORTS_PER_PAGE,
-    )
-    task.strava_calls_made += 1
-    touched = await _process_segment_efforts(db, athlete_id, efforts)
-
-    if len(efforts) < _SEGMENT_EFFORTS_PER_PAGE:
-        return touched
-
-    window_size = window_end - window_start
-    if window_size <= _MIN_SEGMENT_EFFORT_WINDOW:
-        logger.warning(
-            "segment=%d returned the segment_efforts cap inside a %s window; result may be truncated",
-            segment_id, window_size,
-        )
-        return touched
-
-    midpoint = window_start + (window_size / 2)
-    touched.update(
-        await _fetch_segment_effort_window(
-            db, client, athlete_id, segment_id, window_start, midpoint, task
-        )
-    )
-    touched.update(
-        await _fetch_segment_effort_window(
-            db, client, athlete_id, segment_id, midpoint, window_end, task
-        )
-    )
-    return touched
-
-
-async def _fetch_kom_times(
-    db: AsyncSession, client: StravaClient, athlete_id: int, starred: list[dict], task: TaskStatus
-) -> None:
-    now = _now()
-    for seg in starred:
-        segment_id = seg["id"]
-        existing = await _get_enrichment(db, segment_id)
-        if _is_kom_fresh(existing, now):
-            continue
-        detail = await _fetch_segment_detail(client, segment_id, task)
-        if detail is None:
-            continue
-        await _save_segment_enrichment(db, athlete_id, segment_id, detail, existing, now)
-
-
-# ── KOM enrichment helpers ────────────────────────────────────────────────────
-
-def _is_kom_fresh(existing: SegmentEnrichment | None, now: datetime) -> bool:
-    if existing is None or existing.kom_time_s is None:
-        return False
-    age_days = (now - existing.cached_at.replace(tzinfo=timezone.utc)).days
-    return age_days < _KOM_TIME_TTL_DAYS
-
-
-async def _fetch_segment_detail(
-    client: StravaClient, segment_id: int, task: TaskStatus
-) -> dict | None:
-    try:
-        detail = await client.get_segment(segment_id)
+    touched: set[int] = set()
+    page = 1
+    while True:
+        efforts = await client.get_segment_efforts(segment_id=segment_id, per_page=_SEGMENT_EFFORTS_PER_PAGE, page=page)
         task.strava_calls_made += 1
-        return detail
-    except StravaRateLimitError:
-        raise
-    except Exception:
-        logger.warning("failed to fetch KOM time for segment=%d", segment_id)
-        return None
-
-
-def _merge(new_val: object, existing_val: object) -> object:
-    return new_val if new_val is not None else existing_val
+        touched.update(await _process_segment_efforts(db, athlete_id, efforts))
+        if len(efforts) < _SEGMENT_EFFORTS_PER_PAGE:
+            break
+        page += 1
+    return touched
 
 
 def _latlng(raw: object) -> tuple[float | None, float | None]:
@@ -369,80 +293,11 @@ def _latlng(raw: object) -> tuple[float | None, float | None]:
     return (coords[0], coords[1]) if len(coords) == 2 else (None, None)
 
 
-def _build_enrichment_dict(
-    detail: dict, existing: SegmentEnrichment | None, kom_time_s: int | None, now: datetime
-) -> dict:
-    ex = existing
-    start_lat, start_lng = _latlng(detail.get("start_latlng"))
-    end_lat, end_lng = _latlng(detail.get("end_latlng"))
-    return {
-        "segment_name": detail.get("name") or (ex.segment_name if ex else "") or "",
-        "distance_m": _merge(detail.get("distance"), ex.distance_m if ex else None),
-        "avg_grade_pct": _merge(detail.get("average_grade"), ex.avg_grade_pct if ex else None),
-        "max_grade_pct": _merge(detail.get("maximum_grade"), ex.max_grade_pct if ex else None),
-        "start_lat": _merge(start_lat, ex.start_lat if ex else None),
-        "start_lng": _merge(start_lng, ex.start_lng if ex else None),
-        "end_lat": _merge(end_lat, ex.end_lat if ex else None),
-        "end_lng": _merge(end_lng, ex.end_lng if ex else None),
-        "city": _merge(detail.get("city"), ex.city if ex else None),
-        "country": _merge(detail.get("country"), ex.country if ex else None),
-        "state": _merge(detail.get("state"), ex.state if ex else None),
-        "climb_category": detail.get("climb_category"),
-        "elevation_high": _merge(detail.get("elevation_high"), ex.elevation_high if ex else None),
-        "elevation_low": _merge(detail.get("elevation_low"), ex.elevation_low if ex else None),
-        "activity_type": _merge(detail.get("activity_type"), ex.activity_type if ex else None),
-        "hazardous": detail.get("hazardous"),
-        "kom_time_s": kom_time_s,
-        "cached_at": now,
-    }
-
-
-async def _save_segment_enrichment(
-    db: AsyncSession,
-    athlete_id: int,
-    segment_id: int,
-    detail: dict,
-    existing: SegmentEnrichment | None,
-    now: datetime,
-) -> None:
-    xoms = detail.get("xoms") or {}
-    kom_time_s = xom_to_seconds(xoms.get("kom", ""))
-    name = detail.get("name") or (existing.segment_name if existing else "") or ""
-    indoor = is_segment_indoor(detail)
-    enrichment = _build_enrichment_dict(detail, existing, kom_time_s, now)
-
-    await db.execute(
-        sqlite_insert(AthleteSegmentProfile)
-        .values(
-            athlete_id=athlete_id, segment_id=segment_id, segment_name=name,
-            is_starred=True, is_indoor=indoor, times_ridden=0,
-            top10_seen=False, podium_seen=False, updated_at=now,
-        )
-        .on_conflict_do_update(
-            index_elements=["athlete_id", "segment_id"],
-            set_={"segment_name": name, "is_indoor": indoor},
-        )
-    )
-    await db.execute(
-        sqlite_insert(SegmentEnrichment)
-        .values(segment_id=segment_id, **enrichment)
-        .on_conflict_do_update(index_elements=["segment_id"], set_=enrichment)
-    )
-    await db.commit()
-
-
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 async def _get_sync_state(db: AsyncSession, athlete_id: int) -> AthleteSyncState | None:
     result = await db.execute(
         select(AthleteSyncState).where(AthleteSyncState.athlete_id == athlete_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def _get_enrichment(db: AsyncSession, segment_id: int) -> SegmentEnrichment | None:
-    result = await db.execute(
-        select(SegmentEnrichment).where(SegmentEnrichment.segment_id == segment_id)
     )
     return result.scalar_one_or_none()
 
@@ -457,14 +312,19 @@ async def _get_starred_ids(db: AsyncSession, athlete_id: int) -> set[int]:
     return {row[0] for row in result.all()}
 
 
+_ACTIVITY_TYPE_PRIORITY = {"Ride": 0, "Run": 1}
+
+
 async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
     profiles_result = await db.execute(
-        select(AthleteSegmentProfile).where(
+        select(AthleteSegmentProfile, SegmentEnrichment.activity_type)
+        .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
+        .where(
             AthleteSegmentProfile.athlete_id == athlete_id,
             AthleteSegmentProfile.is_starred.is_(True),
         )
     )
-    profiles = profiles_result.scalars().all()
+    rows = profiles_result.all()
 
     finished_result = await db.execute(
         select(SegmentEffortBackfillState.segment_id).where(
@@ -473,17 +333,18 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
         )
     )
     finished = {row[0] for row in finished_result.all()}
-    pending = [profile for profile in profiles if profile.segment_id not in finished]
+    pending = [(profile, activity_type) for profile, activity_type in rows if profile.segment_id not in finished]
 
     pending.sort(
-        key=lambda profile: (
-            1 if profile.is_indoor else 0,
-            1 if profile.pr_time_s is None else 0,
-            profile.segment_name.lower(),
-            profile.segment_id,
+        key=lambda row: (
+            1 if row[0].is_indoor else 0,
+            _ACTIVITY_TYPE_PRIORITY.get(row[1] or "", 2),
+            0 if row[0].is_kom else 1,
+            -(row[0].starred_date.timestamp() if row[0].starred_date else 0),
+            row[0].segment_id,
         )
     )
-    return [profile.segment_id for profile in pending]
+    return [profile.segment_id for profile, _ in pending]
 
 
 async def _mark_segment_effort_backfill_attempt(
@@ -565,49 +426,27 @@ async def _mark_segment_effort_backfill_skipped(
     await db.commit()
 
 
-async def _mark_backfill_complete(
-    db: AsyncSession, athlete_id: int, backfilled_to: datetime
-) -> None:
+async def _mark_backfill_complete(db: AsyncSession, athlete_id: int) -> None:
     await db.execute(
         update(AthleteSyncState)
         .where(AthleteSyncState.athlete_id == athlete_id)
-        .values(backfill_cursor_at=backfilled_to, backfill_complete=True)
+        .values(backfill_complete=True)
     )
     await db.commit()
 
 
-async def _upsert_sync_state(
-    db: AsyncSession,
-    athlete_id: int,
-    after_ts: int,
-) -> None:
-    """Update sync state after a user-triggered run_sync call."""
+async def _upsert_sync_state(db: AsyncSession, athlete_id: int) -> None:
     now = _now()
-    sync_state = await _get_sync_state(db, athlete_id)
-    is_first_sync = not sync_state or not sync_state.bootstrap_done
-    initial_cursor = datetime.fromtimestamp(after_ts, tz=timezone.utc) if is_first_sync else None
-
-    update_set: dict = {
+    update_set = {
         "bootstrap_done": True,
         "last_activity_sync_at": now,
         "last_star_sync_at": now,
-        # A starred-segment sync may have discovered newly starred segments.
-        # The next daily backfill will mark complete again if nothing is pending.
+        # Reset so the next backfill run picks up any newly starred segments.
         "backfill_complete": False,
     }
-    if is_first_sync:
-        update_set["backfill_cursor_at"] = initial_cursor
-
     stmt = (
         sqlite_insert(AthleteSyncState)
-        .values(
-            athlete_id=athlete_id,
-            bootstrap_done=True,
-            last_activity_sync_at=now,
-            last_star_sync_at=now,
-            backfill_cursor_at=initial_cursor,
-            backfill_complete=False,
-        )
+        .values(athlete_id=athlete_id, **update_set)
         .on_conflict_do_update(index_elements=["athlete_id"], set_=update_set)
     )
     await db.execute(stmt)

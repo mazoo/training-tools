@@ -329,7 +329,6 @@ import Layout from "../layouts/Layout.astro";
       if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
         clearInterval(poll);
         hide("status-bar");
-        btn.disabled = false;
 
         if (s.status === "rate_limited") {
           const retryMin = s.retry_after
@@ -337,8 +336,12 @@ import Layout from "../layouts/Layout.astro";
             : 15;
           btn.textContent = `Rate limited — retry in ~${retryMin}m`;
           loadBackfillAvailability();
-          setTimeout(() => { btn.textContent = "Refresh data"; }, retryMin * 60 * 1000);
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = "Refresh data";
+          }, retryMin * 60 * 1000);
         } else {
+          btn.disabled = false;
           btn.textContent = "Refresh data";
           if (s.status === "done") loadCandidates();
           loadBackfillAvailability();
@@ -383,7 +386,6 @@ import Layout from "../layouts/Layout.astro";
       if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
         clearInterval(poll);
         hide("status-bar");
-        btn.disabled = false;
 
         if (s.status === "rate_limited") {
           const retryMin = s.retry_after
@@ -391,10 +393,12 @@ import Layout from "../layouts/Layout.astro";
             : 15;
           btn.textContent = `Rate limited — retry in ~${retryMin}m`;
           setTimeout(() => {
+            btn.disabled = false;
             btn.textContent = "Run daily backfill";
             loadBackfillAvailability();
           }, retryMin * 60 * 1000);
         } else {
+          btn.disabled = false;
           btn.textContent = "Run daily backfill";
           if (s.status === "done") loadCandidates();
           loadBackfillAvailability();

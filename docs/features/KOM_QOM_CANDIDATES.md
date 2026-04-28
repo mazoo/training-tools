@@ -98,7 +98,7 @@ Notes:
 
 ### `POST /api/kom-qom/refresh`
 
-Triggers an activity sync and segment enrichment pass.
+Triggers an activity sync (starred segments + recent activities).
 Returns `202 Accepted` immediately; runs in a background task.
 
 #### Query parameters
@@ -272,11 +272,10 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first sync (`bootstrap_done = false`), `run_sync` fetches activities from the **last 30 days** (time-based window, not a count). This gives candidates quickly without burning the full budget.
-2. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
-3. Subsequent loads read from local DB with no Strava calls.
-4. Manual refresh fetches activities newer than `last_activity_sync_at` only.
-5. Historical data beyond the initial recent sync is extended by the daily backfill cron or by the permissioned UI backfill button. It processes starred segments directly with broad `GET /segment_efforts?per_page=200` windows over the 365-day lookback, marking each segment done/skipped so later runs resume from the remaining segments.
+1. On first connect (`bootstrap_done = false`), `run_sync` syncs starred segments only (1 Strava call). Effort history is populated by the backfill via `GET /segment_efforts` — no activity fetch on bootstrap.
+2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
+3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
+4. Historical data (365-day lookback) comes from the daily backfill cron or the permissioned UI backfill button. It processes starred segments directly with broad `GET /segment_efforts?per_page=200` windows, marking each segment done/skipped so rate-limited runs resume at the next pending segment.
 
 ## Edge cases
 
@@ -284,8 +283,8 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 |------|---------|
 | `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment can still appear if ridden, without top-10/podium rank history |
 | Athlete has efforts but no power meter | `best_avg_watts = null`; card omits watts row |
-| `xoms` absent from segment detail | `kom_time_s = null`; gap row omitted from card |
-| Segment deleted from Strava | 404 from `GET /segments/{id}` → skip enrichment, retain profile from effort history |
+| `kom_time_s` null (no enrichment source) | gap row omitted from card |
+| Segment deleted from Strava | 404 from `GET /segment_efforts` → skipped, retain profile from effort history |
 | `start_latlng` null | `distance_from_home_km = null`; sort these last |
 | `HOME_LAT`/`HOME_LNG` not set | `distance_from_home_km = null` for all; disable distance sort, warn in UI |
 | Activity deleted on Strava | Remove corresponding `segment_effort_digest` rows; recompute affected profiles |

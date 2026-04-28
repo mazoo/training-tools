@@ -161,7 +161,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 
 ## `segment_enrichment` — `SegmentEnrichment` (`models/segment.py`)
 
-Segment metadata shared across athletes. Populated from two sources: geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL); `kom_time_s` and `cached_at` come from `GET /segments/{id}` and are refreshed on a 7-day TTL. `gap_to_kom_s` is **not stored** — computed at query time.
+Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is not currently populated — `GET /segments/{id}` is not called during refresh to keep Strava budget low; the column stays null. `gap_to_kom_s` is **not stored** — computed at query time.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -182,8 +182,8 @@ Segment metadata shared across athletes. Populated from two sources: geometry/gr
 | `elevation_low` | Float? | Absolute altitude at bottom of segment (m) |
 | `activity_type` | String? | `"Ride"`, `"Run"`, `"VirtualRide"` — primary indoor signal |
 | `hazardous` | Boolean? | Strava-flagged dangerous segment |
-| `kom_time_s` | Integer? | Current KOM time in seconds (from `xoms` field); null if unavailable |
-| `cached_at` | DateTime | Tracks KOM-time freshness; stale after 7 days → triggers `GET /segments/{id}` |
+| `kom_time_s` | Integer? | KOM time in seconds; null (not populated — `GET /segments/{id}` not called) |
+| `cached_at` | DateTime | Timestamp of last enrichment write (set during starred-segment sync) |
 
 ---
 
