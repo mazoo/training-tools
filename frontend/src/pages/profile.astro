@@ -63,38 +63,69 @@ import Layout from "../layouts/Layout.astro";
       </div>
     </section>
 
-    <!-- Home location card -->
+    <!-- KOM/QOM Candidates card -->
     <section class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-      <h2 class="text-base font-semibold text-white mb-1">Home Location</h2>
-      <p class="text-sm text-gray-500 mb-5">
-        Used to sort KOM / QOM candidates by distance from home.
-      </p>
+      <h2 class="text-base font-semibold text-white mb-6">KOM/QOM Candidates</h2>
 
-      <form id="home-form" class="space-y-4">
-        <label class="block">
-          <span class="text-xs text-gray-400 uppercase tracking-wide mb-1.5 block">Address</span>
-          <input
-            id="home-address"
-            type="text"
-            autocomplete="street-address"
-            placeholder="Fegetzhofweg 36, Solothurn"
-            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-        </label>
+      <!-- Home Location subsection -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-gray-300 mb-1">Home Location</h3>
+        <p class="text-sm text-gray-500 mb-4">
+          Used to sort candidates by distance from home.
+        </p>
 
-        <p id="home-coords" class="text-xs text-gray-600 hidden"></p>
+        <form id="home-form" class="space-y-4">
+          <label class="block">
+            <span class="text-xs text-gray-400 uppercase tracking-wide mb-1.5 block">Address</span>
+            <input
+              id="home-address"
+              type="text"
+              autocomplete="street-address"
+              placeholder="Fegetzhofweg 36, Solothurn"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+            />
+          </label>
 
-        <div class="flex items-center gap-3 flex-wrap">
+          <p id="home-coords" class="text-xs text-gray-600 hidden"></p>
+
+          <div class="flex items-center gap-3 flex-wrap">
+            <button
+              type="submit"
+              id="btn-save-home"
+              class="text-sm bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+            >
+              Save
+            </button>
+            <span id="home-feedback" class="text-sm"></span>
+          </div>
+        </form>
+      </div>
+
+      <div class="border-t border-gray-800 my-6"></div>
+
+      <!-- Data Housekeeping subsection -->
+      <div>
+        <h3 class="text-sm font-medium text-gray-300 mb-1">Data Housekeeping</h3>
+        <p class="text-sm text-gray-500 mb-4">
+          Sync recent Strava activities or run the full historical backfill.
+        </p>
+
+        <div class="flex flex-wrap gap-2">
           <button
-            type="submit"
-            id="btn-save-home"
+            id="btn-refresh"
             class="text-sm bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
           >
-            Save
+            Refresh data
           </button>
-          <span id="home-feedback" class="text-sm"></span>
+          <button
+            id="btn-backfill"
+            class="hidden text-sm bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 disabled:text-sky-200/60 border border-sky-500/60 disabled:border-sky-800 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            Run daily backfill
+          </button>
         </div>
-      </form>
+        <p id="housekeeping-status" class="hidden text-sm text-gray-400 mt-3"></p>
+      </div>
     </section>
 
     <!-- Danger zone -->
@@ -200,6 +231,8 @@ import Layout from "../layouts/Layout.astro";
     if (data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
       loadStravaAccessToken();
     }
+
+    loadBackfillAvailability();
   }
 
   async function loadStravaAccessToken() {
@@ -227,7 +260,127 @@ import Layout from "../layouts/Layout.astro";
     const form = document.getElementById("home-form") as HTMLFormElement;
     form.style.opacity = "0.4";
     form.style.pointerEvents = "none";
+    (document.getElementById("btn-refresh") as HTMLButtonElement).disabled = true;
   }
+
+  // ── Data Housekeeping ──────────────────────────────────────────────────────
+
+  async function loadBackfillAvailability() {
+    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
+    btn.classList.add("hidden");
+    try {
+      const res = await apiFetch("/api/kom-qom/backfill/availability");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.available) {
+        btn.disabled = false;
+        btn.textContent = "Run daily backfill";
+        btn.classList.remove("hidden");
+      }
+    } catch {
+      // backfill button stays hidden
+    }
+  }
+
+  function setHousekeepingStatus(text: string, tone: "neutral" | "ok" | "error" = "neutral") {
+    const el = document.getElementById("housekeeping-status") as HTMLElement;
+    el.textContent = text;
+    el.className = [
+      "text-sm mt-3",
+      tone === "ok" ? "text-green-400" : tone === "error" ? "text-red-400" : "text-gray-400",
+    ].join(" ");
+    el.classList.remove("hidden");
+  }
+
+  async function pollTask(
+    taskId: string,
+    path: string,
+    label: (s: any) => string,
+    onDone: () => void
+  ) {
+    const poll = setInterval(async () => {
+      try {
+        const sr = await apiFetch(`${path}/${taskId}`);
+        const s = await sr.json();
+        setHousekeepingStatus(label(s));
+        if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
+          clearInterval(poll);
+          if (s.status === "done") {
+            setHousekeepingStatus("Done.", "ok");
+            setTimeout(() => {
+              document.getElementById("housekeeping-status")?.classList.add("hidden");
+            }, 3000);
+          } else if (s.status === "rate_limited") {
+            const retryMin = s.retry_after
+              ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
+              : 15;
+            setHousekeepingStatus(`Rate limited — retry in ~${retryMin} min.`, "error");
+          } else {
+            setHousekeepingStatus(s.error ?? "Something went wrong.", "error");
+          }
+          onDone();
+        }
+      } catch {
+        clearInterval(poll);
+        setHousekeepingStatus("Lost connection to server.", "error");
+        onDone();
+      }
+    }, 3000);
+  }
+
+  document.getElementById("btn-refresh")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-refresh") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+    setHousekeepingStatus("Starting sync…");
+
+    try {
+      const res = await apiFetch("/api/kom-qom/refresh", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const { task_id } = await res.json();
+      pollTask(
+        task_id,
+        "/api/kom-qom/refresh",
+        (s) => `Synced ${s.activities_processed} / ${s.activities_total ?? "?"} activities`,
+        () => {
+          btn.disabled = false;
+          btn.textContent = "Refresh data";
+          loadBackfillAvailability();
+        }
+      );
+    } catch {
+      setHousekeepingStatus("Failed to start sync.", "error");
+      btn.disabled = false;
+      btn.textContent = "Refresh data";
+    }
+  });
+
+  document.getElementById("btn-backfill")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Backfilling…";
+    setHousekeepingStatus("Starting backfill…");
+
+    try {
+      const res = await apiFetch("/api/kom-qom/backfill", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const { task_id } = await res.json();
+      pollTask(
+        task_id,
+        "/api/kom-qom/backfill",
+        (s) => `Backfilled ${s.activities_processed} / ${s.activities_total ?? "?"} segments`,
+        () => {
+          btn.disabled = false;
+          btn.textContent = "Run daily backfill";
+          loadBackfillAvailability();
+        }
+      );
+    } catch {
+      setHousekeepingStatus("Failed to start backfill.", "error");
+      btn.disabled = false;
+      btn.textContent = "Run daily backfill";
+    }
+  });
 
   // Disconnect
   document.getElementById("btn-disconnect")?.addEventListener("click", async () => {

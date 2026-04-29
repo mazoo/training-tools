@@ -192,7 +192,8 @@ Layout:
 The search box and sort dropdown are rendered side-by-side above the candidate list (not in the sidebar). Filtering and sorting are client-side — no extra API call on change.
 
 **Sort options (dropdown, top-right of list):**
-- **KOM / Podium / Top-10 + distance** (default): groups by rank tier (KOM → Podium → Top-10), then sorts by `distance_from_home_km` ASC within each tier (nulls last).
+- **Gap to KOM** (default): flat sort by `gap_to_kom_s` ASC — current KOM holders (0 s gap) first, then closest to KOM, segments without KOM time data last (nulls last).
+- **KOM / Podium / Top-10 + distance**: groups by rank tier (KOM → Podium → Top-10), then sorts by `distance_from_home_km` ASC within each tier (nulls last).
 - **Distance from home**: flat sort by `distance_from_home_km` ASC regardless of rank (nulls last).
 
 Each segment card shows:

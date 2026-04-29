@@ -3,76 +3,56 @@ import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="KOM / QOM Candidates">
-  <div class="flex h-full">
-    <!-- Filter sidebar -->
-    <aside class="w-64 shrink-0 bg-gray-900 border-r border-gray-800 p-5 flex flex-col gap-6">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Filters</h2>
+  <div class="px-4 sm:px-6 lg:px-8 py-5 max-w-5xl mx-auto space-y-4">
 
-      <label class="flex items-center justify-between cursor-pointer">
-        <span class="text-sm text-gray-300">KOM/QOM included</span>
-        <span class="relative inline-flex items-center">
-          <input id="f-kom-included" type="checkbox" class="sr-only peer" checked />
-          <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
-          <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
-        </span>
-      </label>
+    <!-- Search + Sort -->
+    <div class="flex gap-3 items-center">
+      <input
+        id="f-search"
+        type="search"
+        placeholder="Search segment name…"
+        class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+      />
+      <select
+        id="f-sort"
+        class="shrink-0 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer"
+      >
+        <option value="gap-to-kom" selected>Gap to KOM</option>
+        <option value="rank-distance">KOM / Podium / Top-10 + distance</option>
+        <option value="distance">Distance from home</option>
+      </select>
+    </div>
 
-      <label class="flex items-center justify-between cursor-pointer">
-        <span class="text-sm text-gray-300">Rides only</span>
-        <span class="relative inline-flex items-center">
-          <input id="f-rides-only" type="checkbox" class="sr-only peer" checked />
-          <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
-          <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
-        </span>
-      </label>
+    <!-- Filter panel -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
 
-      <div>
-        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Effort time (min)</p>
-        <div class="flex items-center gap-2">
-          <input
-            id="f-time-min"
-            type="number"
-            min="0"
-            placeholder="Min"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-          <span class="text-gray-600">–</span>
-          <input
-            id="f-time-max"
-            type="number"
-            min="0"
-            placeholder="Max"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-        </div>
-      </div>
+      <!-- Row 1: toggles + surface + action buttons -->
+      <div class="flex flex-wrap gap-x-5 gap-y-3 items-center">
 
-      <div>
-        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Average gradient (%)</p>
-        <div class="flex items-center gap-2">
-          <input
-            id="f-grad-min"
-            type="number"
-            step="0.1"
-            placeholder="Min"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-          <span class="text-gray-600">–</span>
-          <input
-            id="f-grad-max"
-            type="number"
-            step="0.1"
-            placeholder="Max"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-500"
-          />
-        </div>
-      </div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <span class="relative inline-flex items-center">
+            <input id="f-kom-included" type="checkbox" class="sr-only peer" />
+            <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+          </span>
+          <span class="text-sm text-gray-300">KOM/QOM included</span>
+        </label>
 
-      <div>
-        <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Surface</p>
-        <div class="flex flex-col gap-1">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <span class="relative inline-flex items-center">
+            <input id="f-rides-only" type="checkbox" class="sr-only peer" checked />
+            <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+          </span>
+          <span class="text-sm text-gray-300">Rides only</span>
+        </label>
+
+        <div class="hidden sm:block w-px h-4 bg-gray-700 shrink-0"></div>
+
+        <!-- Surface radios inline -->
+        <div class="flex items-center gap-3">
           {["all", "outdoor", "indoor"].map((val) => (
-            <label class="flex items-center gap-2 cursor-pointer">
+            <label class="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="radio"
                 name="surface"
@@ -84,68 +64,132 @@ import Layout from "../layouts/Layout.astro";
             </label>
           ))}
         </div>
+
+
       </div>
 
-      <div class="mt-auto flex flex-col gap-2">
-        <button
-          id="btn-backfill"
-          class="hidden text-sm bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 disabled:text-sky-200/60 border border-sky-500/60 disabled:border-sky-800 text-white rounded-lg px-3 py-2 transition-colors"
-        >
-          Run daily backfill
-        </button>
-        <button
-          id="btn-refresh"
-          class="text-sm bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-lg px-3 py-2 transition-colors"
-        >
-          Refresh data
-        </button>
-      </div>
-    </aside>
+      <!-- Row 2: dual sliders in a 2-col grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
 
-    <!-- Main content -->
-    <div class="flex-1 overflow-auto px-6 py-5">
-      <!-- Status bar -->
-      <div id="status-bar" class="hidden mb-4 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 text-sm text-gray-400">
-        <span id="status-text">Syncing…</span>
-        <div class="mt-1 h-1 bg-gray-800 rounded-full overflow-hidden">
-          <div id="status-progress" class="h-full bg-sky-500 rounded-full transition-all" style="width:0%"></div>
+        <div>
+          <div class="flex justify-between items-baseline mb-3">
+            <p class="text-xs text-gray-500 uppercase tracking-wider">Effort time</p>
+            <span id="time-range-label" class="text-xs text-gray-400">—</span>
+          </div>
+          <div class="dual-range-wrap">
+            <div class="dual-range-track">
+              <div class="dual-range-fill" id="time-fill"></div>
+            </div>
+            <input id="f-time-min" type="range" step="1" class="dual-range" />
+            <input id="f-time-max" type="range" step="1" class="dual-range" />
+          </div>
         </div>
-      </div>
 
-      <!-- Search + Sort -->
-      <div class="mb-4 flex gap-3 items-center">
-        <input
-          id="f-search"
-          type="search"
-          placeholder="Search segment name…"
-          class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-        />
-        <select
-          id="f-sort"
-          class="shrink-0 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer"
-        >
-          <option value="rank-distance">KOM / Podium / Top-10 + distance</option>
-          <option value="distance">Distance from home</option>
-        </select>
-      </div>
+        <div>
+          <div class="flex justify-between items-baseline mb-3">
+            <p class="text-xs text-gray-500 uppercase tracking-wider">Avg gradient</p>
+            <span id="grad-range-label" class="text-xs text-gray-400">—</span>
+          </div>
+          <div class="dual-range-wrap">
+            <div class="dual-range-track">
+              <div class="dual-range-fill" id="grad-fill"></div>
+            </div>
+            <input id="f-grad-min" type="range" step="0.5" class="dual-range" />
+            <input id="f-grad-max" type="range" step="0.5" class="dual-range" />
+          </div>
+        </div>
 
-      <!-- Empty / loading states -->
-      <div id="state-loading" class="text-gray-500 text-sm py-8 text-center">Loading…</div>
-      <div id="state-empty-no-data" class="hidden text-gray-500 text-sm py-8 text-center">
-        No candidates yet.<br />Hit <strong class="text-gray-400">Refresh data</strong> to sync your Strava history.
       </div>
-      <div id="state-empty-filtered" class="hidden text-gray-500 text-sm py-8 text-center">
-        No segments match the active filters.
-      </div>
-      <div id="state-unauthenticated" class="hidden text-gray-500 text-sm py-8 text-center">
-        <a href="/auth/login" class="text-sky-500 hover:text-sky-400">Connect Strava</a> to see your candidates.
-      </div>
-
-      <!-- Candidate list -->
-      <div id="candidate-list" class="hidden space-y-3"></div>
     </div>
+
+    <!-- Empty / loading states -->
+    <div id="state-loading" class="text-gray-500 text-sm py-8 text-center">Loading…</div>
+    <div id="state-empty-no-data" class="hidden text-gray-500 text-sm py-8 text-center">
+      No candidates yet.<br />Hit <strong class="text-gray-400">Refresh data</strong> to sync your Strava history.
+    </div>
+    <div id="state-empty-filtered" class="hidden text-gray-500 text-sm py-8 text-center">
+      No segments match the active filters.
+    </div>
+    <div id="state-unauthenticated" class="hidden text-gray-500 text-sm py-8 text-center">
+      <a href="/auth/login" class="text-sky-500 hover:text-sky-400">Connect Strava</a> to see your candidates.
+    </div>
+
+    <!-- Candidate list -->
+    <div id="candidate-list" class="hidden space-y-3"></div>
+
   </div>
 </Layout>
+
+<style>
+  .dual-range-wrap {
+    position: relative;
+    height: 20px;
+    display: flex;
+    align-items: center;
+  }
+  .dual-range-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #374151;
+    border-radius: 9999px;
+  }
+  .dual-range-fill {
+    position: absolute;
+    height: 100%;
+    background: #0284c7;
+    border-radius: 9999px;
+    left: 0%;
+    right: 0%;
+  }
+  .dual-range {
+    position: absolute;
+    width: 100%;
+    height: 20px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+    margin: 0;
+    padding: 0;
+  }
+  .dual-range::-webkit-slider-runnable-track {
+    background: transparent;
+    height: 4px;
+  }
+  .dual-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    pointer-events: all;
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    background: #ffffff;
+    border: 2px solid #0284c7;
+    cursor: pointer;
+    margin-top: -8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+  .dual-range:focus::-webkit-slider-thumb {
+    outline: 2px solid #38bdf8;
+    outline-offset: 1px;
+  }
+  .dual-range::-moz-range-track {
+    background: transparent;
+    height: 4px;
+  }
+  .dual-range::-moz-range-thumb {
+    pointer-events: all;
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    background: #ffffff;
+    border: 2px solid #0284c7;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+</style>
 
 <script>
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -212,11 +256,71 @@ import Layout from "../layouts/Layout.astro";
       </div>`;
   }
 
+  // ── slider state ──────────────────────────────────────────────────────────
+
+  let timeAbsMin = 0;
+  let timeAbsMax = 120;
+  let gradAbsMin = 0;
+  let gradAbsMax = 20;
+
+  function updateFill(fillId: string, minEl: HTMLInputElement, maxEl: HTMLInputElement) {
+    const fill = document.getElementById(fillId)!;
+    const lo = Number(minEl.min);
+    const hi = Number(minEl.max);
+    const span = hi - lo;
+    if (span <= 0) return;
+    const leftPct = ((Number(minEl.value) - lo) / span) * 100;
+    const rightPct = ((hi - Number(maxEl.value)) / span) * 100;
+    fill.style.left = `${leftPct}%`;
+    fill.style.right = `${rightPct}%`;
+  }
+
+  function updateTimeLabel() {
+    const minV = (document.getElementById("f-time-min") as HTMLInputElement).value;
+    const maxV = (document.getElementById("f-time-max") as HTMLInputElement).value;
+    document.getElementById("time-range-label")!.textContent = `${minV} – ${maxV} min`;
+  }
+
+  function updateGradLabel() {
+    const minV = parseFloat((document.getElementById("f-grad-min") as HTMLInputElement).value).toFixed(1);
+    const maxV = parseFloat((document.getElementById("f-grad-max") as HTMLInputElement).value).toFixed(1);
+    document.getElementById("grad-range-label")!.textContent = `${minV} – ${maxV}%`;
+  }
+
+  function initSliders(candidates: any[]) {
+    const times = candidates.map((c) => c.best_time_s).filter((t) => t != null) as number[];
+    const grades = candidates.map((c) => c.average_grade).filter((g) => g != null) as number[];
+
+    timeAbsMin = times.length ? Math.floor(Math.min(...times) / 60) : 0;
+    timeAbsMax = times.length ? Math.ceil(Math.max(...times) / 60) : 120;
+    gradAbsMin = grades.length ? Math.floor(Math.min(...grades)) : 0;
+    gradAbsMax = grades.length ? Math.ceil(Math.max(...grades)) : 20;
+
+    const tMin = document.getElementById("f-time-min") as HTMLInputElement;
+    const tMax = document.getElementById("f-time-max") as HTMLInputElement;
+    tMin.min = tMax.min = String(timeAbsMin);
+    tMin.max = tMax.max = String(timeAbsMax);
+    tMin.value = String(timeAbsMin);
+    tMax.value = String(timeAbsMax);
+
+    const gMin = document.getElementById("f-grad-min") as HTMLInputElement;
+    const gMax = document.getElementById("f-grad-max") as HTMLInputElement;
+    gMin.min = gMax.min = String(gradAbsMin);
+    gMin.max = gMax.max = String(gradAbsMax);
+    gMin.value = String(gradAbsMin);
+    gMax.value = String(gradAbsMax);
+
+    updateFill("time-fill", tMin, tMax);
+    updateFill("grad-fill", gMin, gMax);
+    updateTimeLabel();
+    updateGradLabel();
+  }
+
   // ── state ─────────────────────────────────────────────────────────────────
 
   let allCandidates: any[] = [];
-  type SortMode = "rank-distance" | "distance";
-  let currentSort: SortMode = "rank-distance";
+  type SortMode = "gap-to-kom" | "rank-distance" | "distance";
+  let currentSort: SortMode = "gap-to-kom";
 
   function rankGroup(c: any): number {
     if (c.is_kom) return 0;
@@ -232,6 +336,11 @@ import Layout from "../layouts/Layout.astro";
         nullsLast(a.distance_from_home_km) - nullsLast(b.distance_from_home_km)
       );
     }
+    if (currentSort === "gap-to-kom") {
+      return [...candidates].sort((a, b) =>
+        nullsLast(a.gap_to_kom_s) - nullsLast(b.gap_to_kom_s)
+      );
+    }
     return [...candidates].sort((a, b) => {
       const rDiff = rankGroup(a) - rankGroup(b);
       if (rDiff !== 0) return rDiff;
@@ -242,13 +351,13 @@ import Layout from "../layouts/Layout.astro";
   function getFilters() {
     const komIncluded = (document.getElementById("f-kom-included") as HTMLInputElement).checked;
     const ridesOnly = (document.getElementById("f-rides-only") as HTMLInputElement).checked;
-    const timeMin = (document.getElementById("f-time-min") as HTMLInputElement).value;
-    const timeMax = (document.getElementById("f-time-max") as HTMLInputElement).value;
-    const gradMin = (document.getElementById("f-grad-min") as HTMLInputElement).value;
-    const gradMax = (document.getElementById("f-grad-max") as HTMLInputElement).value;
+    const timeMinVal = Number((document.getElementById("f-time-min") as HTMLInputElement).value);
+    const timeMaxVal = Number((document.getElementById("f-time-max") as HTMLInputElement).value);
+    const gradMinVal = Number((document.getElementById("f-grad-min") as HTMLInputElement).value);
+    const gradMaxVal = Number((document.getElementById("f-grad-max") as HTMLInputElement).value);
     const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
     const search = (document.getElementById("f-search") as HTMLInputElement).value.trim().toLowerCase();
-    return { komIncluded, ridesOnly, timeMin, timeMax, gradMin, gradMax, surface, search };
+    return { komIncluded, ridesOnly, timeMinVal, timeMaxVal, gradMinVal, gradMaxVal, surface, search };
   }
 
   function applyFilters() {
@@ -257,10 +366,14 @@ import Layout from "../layouts/Layout.astro";
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (!f.komIncluded && c.is_kom) return false;
       if (f.ridesOnly && c.activity_type === "Run") return false;
-      if (f.timeMin && c.best_time_s != null && c.best_time_s < Number(f.timeMin) * 60) return false;
-      if (f.timeMax && c.best_time_s != null && c.best_time_s > Number(f.timeMax) * 60) return false;
-      if (f.gradMin && c.average_grade != null && c.average_grade < Number(f.gradMin)) return false;
-      if (f.gradMax && c.average_grade != null && c.average_grade > Number(f.gradMax)) return false;
+      if (c.best_time_s != null) {
+        if (f.timeMinVal > timeAbsMin && c.best_time_s < f.timeMinVal * 60) return false;
+        if (f.timeMaxVal < timeAbsMax && c.best_time_s > f.timeMaxVal * 60) return false;
+      }
+      if (c.average_grade != null) {
+        if (f.gradMinVal > gradAbsMin && c.average_grade < f.gradMinVal) return false;
+        if (f.gradMaxVal < gradAbsMax && c.average_grade > f.gradMaxVal) return false;
+      }
       if (f.surface === "outdoor" && c.is_indoor) return false;
       if (f.surface === "indoor" && !c.is_indoor) return false;
       return true;
@@ -310,6 +423,7 @@ import Layout from "../layouts/Layout.astro";
       }
       const data = await res.json();
       allCandidates = data.candidates ?? [];
+      initSliders(allCandidates);
       hide("state-loading");
       applyFilters();
     } catch {
@@ -318,145 +432,7 @@ import Layout from "../layouts/Layout.astro";
     }
   }
 
-  async function loadBackfillAvailability() {
-    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
-    if (!btn) return;
-    hide("btn-backfill");
-
-    const t = token();
-    if (!t) return;
-
-    try {
-      const res = await fetch("/api/kom-qom/backfill/availability", { headers: authHeaders() });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.available) {
-        btn.disabled = false;
-        btn.textContent = "Run daily backfill";
-        show("btn-backfill");
-      }
-    } catch {
-      hide("btn-backfill");
-    }
-  }
-
-  async function triggerRefresh() {
-    const btn = document.getElementById("btn-refresh") as HTMLButtonElement;
-    btn.disabled = true;
-    btn.textContent = "Syncing…";
-
-    const res = await fetch("/api/kom-qom/refresh", {
-      method: "POST",
-      headers: authHeaders(),
-    });
-    if (!res.ok) {
-      btn.disabled = false;
-      btn.textContent = "Refresh data";
-      return;
-    }
-    const { task_id } = await res.json();
-
-    show("status-bar");
-    const statusText = document.getElementById("status-text")!;
-    const progressBar = document.getElementById("status-progress")!;
-
-    const poll = setInterval(async () => {
-      const sr = await fetch(`/api/kom-qom/refresh/${task_id}`, { headers: authHeaders() });
-      const s = await sr.json();
-      const pct = s.activities_total > 0
-        ? Math.round((s.activities_processed / s.activities_total) * 100)
-        : 0;
-      progressBar.style.width = `${pct}%`;
-      const budget = s.strava_budget_remaining_15min != null
-        ? ` · ${s.strava_budget_remaining_15min} / ${s.strava_budget_remaining_daily} API calls left`
-        : "";
-      statusText.textContent = `Synced ${s.activities_processed} / ${s.activities_total} activities (${s.strava_calls_made} API calls${budget})`;
-
-      if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
-        clearInterval(poll);
-        hide("status-bar");
-
-        if (s.status === "rate_limited") {
-          const retryMin = s.retry_after
-            ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
-            : 15;
-          btn.textContent = `Rate limited — retry in ~${retryMin}m`;
-          loadBackfillAvailability();
-          setTimeout(() => {
-            btn.disabled = false;
-            btn.textContent = "Refresh data";
-          }, retryMin * 60 * 1000);
-        } else {
-          btn.disabled = false;
-          btn.textContent = "Refresh data";
-          if (s.status === "done") loadCandidates();
-          loadBackfillAvailability();
-        }
-      }
-    }, 3000);
-  }
-
-  async function triggerBackfill() {
-    const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
-    btn.disabled = true;
-    btn.textContent = "Backfilling…";
-
-    const res = await fetch("/api/kom-qom/backfill", {
-      method: "POST",
-      headers: authHeaders(),
-    });
-    if (!res.ok) {
-      btn.disabled = false;
-      btn.textContent = "Run daily backfill";
-      loadBackfillAvailability();
-      return;
-    }
-    const { task_id } = await res.json();
-
-    show("status-bar");
-    const statusText = document.getElementById("status-text")!;
-    const progressBar = document.getElementById("status-progress")!;
-
-    const poll = setInterval(async () => {
-      const sr = await fetch(`/api/kom-qom/backfill/${task_id}`, { headers: authHeaders() });
-      const s = await sr.json();
-      const pct = s.activities_total > 0
-        ? Math.round((s.activities_processed / s.activities_total) * 100)
-        : 0;
-      progressBar.style.width = `${pct}%`;
-      const budget = s.strava_budget_remaining_15min != null
-        ? ` · ${s.strava_budget_remaining_15min} / ${s.strava_budget_remaining_daily} API calls left`
-        : "";
-      statusText.textContent = `Backfilled ${s.activities_processed} / ${s.activities_total} segments (${s.strava_calls_made} API calls${budget})`;
-
-      if (s.status === "done" || s.status === "error" || s.status === "rate_limited") {
-        clearInterval(poll);
-        hide("status-bar");
-
-        if (s.status === "rate_limited") {
-          const retryMin = s.retry_after
-            ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
-            : 15;
-          btn.textContent = `Rate limited — retry in ~${retryMin}m`;
-          setTimeout(() => {
-            btn.disabled = false;
-            btn.textContent = "Run daily backfill";
-            loadBackfillAvailability();
-          }, retryMin * 60 * 1000);
-        } else {
-          btn.disabled = false;
-          btn.textContent = "Run daily backfill";
-          if (s.status === "done") loadCandidates();
-          loadBackfillAvailability();
-        }
-      }
-    }, 3000);
-  }
-
   // ── wire up ───────────────────────────────────────────────────────────────
-
-  document.getElementById("btn-refresh")?.addEventListener("click", triggerRefresh);
-  document.getElementById("btn-backfill")?.addEventListener("click", triggerBackfill);
 
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
   document.getElementById("f-sort")?.addEventListener("change", (e) => {
@@ -466,13 +442,36 @@ import Layout from "../layouts/Layout.astro";
 
   document.getElementById("f-kom-included")?.addEventListener("change", applyFilters);
   document.getElementById("f-rides-only")?.addEventListener("change", applyFilters);
-  ["f-time-min", "f-time-max", "f-grad-min", "f-grad-max"].forEach((id) => {
-    document.getElementById(id)?.addEventListener("input", applyFilters);
-  });
   document.querySelectorAll('input[name="surface"]').forEach((el) => {
     el.addEventListener("change", applyFilters);
   });
 
+  function wireSlider(
+    minId: string,
+    maxId: string,
+    fillId: string,
+    labelFn: () => void
+  ) {
+    const minEl = document.getElementById(minId) as HTMLInputElement;
+    const maxEl = document.getElementById(maxId) as HTMLInputElement;
+
+    minEl.addEventListener("input", () => {
+      if (Number(minEl.value) > Number(maxEl.value)) minEl.value = maxEl.value;
+      updateFill(fillId, minEl, maxEl);
+      labelFn();
+      applyFilters();
+    });
+
+    maxEl.addEventListener("input", () => {
+      if (Number(maxEl.value) < Number(minEl.value)) maxEl.value = minEl.value;
+      updateFill(fillId, minEl, maxEl);
+      labelFn();
+      applyFilters();
+    });
+  }
+
+  wireSlider("f-time-min", "f-time-max", "time-fill", updateTimeLabel);
+  wireSlider("f-grad-min", "f-grad-max", "grad-fill", updateGradLabel);
+
   loadCandidates();
-  loadBackfillAvailability();
 </script>
