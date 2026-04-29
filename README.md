@@ -58,6 +58,7 @@ training-tools/
 │   ├── pyproject.toml
 │   └── .env.example
 └── frontend/
+    ├── public/               ← static assets served from site root (favicon, logo assets)
     ├── src/
     │   ├── pages/             ← .astro files, one per tool page
     │   ├── layouts/           ← shared Layout.astro (nav + auth state)
