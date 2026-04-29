@@ -106,8 +106,8 @@ import Layout from "../layouts/Layout.astro";
       <!-- Data Housekeeping subsection -->
       <div>
         <h3 class="text-sm font-medium text-gray-300 mb-1">Data Housekeeping</h3>
-        <p class="text-sm text-gray-500 mb-4">
-          Sync recent Strava activities or run the full historical backfill.
+        <p id="housekeeping-description" class="text-sm text-gray-500 mb-4">
+          Sync recent Strava activities.
         </p>
 
         <div class="flex flex-wrap gap-2">
@@ -132,7 +132,7 @@ import Layout from "../layouts/Layout.astro";
     <section id="danger-zone" class="hidden border border-red-900 rounded-xl p-6">
       <h2 class="text-base font-semibold text-red-400 mb-1">Danger Zone</h2>
       <p class="text-sm text-gray-500 mb-5">
-        Permanently deletes your account and all associated training data. This cannot be undone.
+        Permanently deletes your account and locally stored training data from Training Tools. Your Strava data is not deleted.
       </p>
 
       <div id="delete-confirm" class="hidden mb-4 bg-gray-900 border border-red-800 rounded-lg p-4">
@@ -179,7 +179,9 @@ import Layout from "../layouts/Layout.astro";
     });
   }
 
+  const BACKFILL_FROM_UI = "backfill_from_ui";
   const STRAVA_API_TOKEN_VISIBLE = "strava_api_token_visible";
+  let canRunBackfill = false;
 
   async function init() {
     if (!token) {
@@ -228,11 +230,16 @@ import Layout from "../layouts/Layout.astro";
       coordsEl.classList.remove("hidden");
     }
 
+    canRunBackfill = data.permissions?.includes(BACKFILL_FROM_UI) ?? false;
+    updateHousekeepingDescription();
+
     if (data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
       loadStravaAccessToken();
     }
 
-    loadBackfillAvailability();
+    if (canRunBackfill) {
+      loadBackfillAvailability();
+    }
   }
 
   async function loadStravaAccessToken() {
@@ -265,9 +272,17 @@ import Layout from "../layouts/Layout.astro";
 
   // ── Data Housekeeping ──────────────────────────────────────────────────────
 
+  function updateHousekeepingDescription() {
+    const description = document.getElementById("housekeeping-description") as HTMLElement;
+    description.textContent = canRunBackfill
+      ? "Sync recent Strava activities or run the full historical backfill."
+      : "Sync recent Strava activities.";
+  }
+
   async function loadBackfillAvailability() {
     const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
     btn.classList.add("hidden");
+    if (!canRunBackfill) return;
     try {
       const res = await apiFetch("/api/kom-qom/backfill/availability");
       if (!res.ok) return;
