@@ -80,14 +80,15 @@ Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activi
    └─ order: high-value candidates first, using the same best-chance priority as onboarding
 
 2. Read pending starred segments from local DB
-   └─ skip segments already marked done/skipped in segment_effort_backfill_state
+   └─ skip segments already marked done/skipped in segment_effort_backfill_state,
+      except stale done rows with no imported efforts and a starred PR seed
    └─ prioritize already gap-enriched candidates, then remaining starred segments
 
 3. For each pending starred segment:
-   GET /segment_efforts?segment_id={id}&start_date_local={now-365d}&end_date_local={now}&per_page=200
+   GET /segment_efforts?segment_id={id}&per_page=200&page={page}
    └─ normally returns all efforts for that segment in one call
-   └─ if exactly 200 efforts are returned and the run budget is exhausted, leave pending
-      so a future run can continue safely
+   └─ if exactly 200 efforts are returned, request the next page while budget remains;
+      if the run budget is exhausted, leave pending so a future run can continue safely
 
 4. Store efforts in segment_effort_digest
    └─ recompute athlete_segment_profile for touched segments
@@ -139,7 +140,7 @@ On a typical incremental refresh with 3 new activities since last sync:
 - 1 call: activity list
 - 3 calls: activity details
 
-Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. It first fills missing/stale KOM-time enrichment for high-value candidates, then uses one `GET /segment_efforts` call per starred segment in the normal case. Dense segments that hit the `per_page=200` cap stay pending if the run budget is exhausted.
+Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. It first fills missing/stale KOM-time enrichment for high-value candidates, then uses one `GET /segment_efforts` call per starred segment in the normal case. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
 
 Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 

@@ -2,7 +2,7 @@ import logging
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from dataclasses import dataclass
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -217,7 +217,7 @@ async def run_backfill_chunk(
             task.activities_processed = processed
 
         segment_ids: list[int] = []
-        if not sync_state.backfill_complete and not _call_budget_exhausted(task, call_budget):
+        if not _call_budget_exhausted(task, call_budget):
             remaining_call_budget = _remaining_call_budget(task, call_budget)
             segment_ids = await _get_pending_segment_effort_backfill_ids(db, athlete_id)
             if remaining_call_budget is not None:
@@ -537,6 +537,7 @@ def _has_kom_time(profile: AthleteSegmentProfile, enrichment: SegmentEnrichment 
 
 
 async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
+    sync_state = await _get_sync_state(db, athlete_id)
     profiles_result = await db.execute(
         select(AthleteSegmentProfile, SegmentEnrichment)
         .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
@@ -547,14 +548,42 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
     )
     rows = profiles_result.all()
 
-    finished_result = await db.execute(
-        select(SegmentEffortBackfillState.segment_id).where(
+    state_result = await db.execute(
+        select(SegmentEffortBackfillState).where(
             SegmentEffortBackfillState.athlete_id == athlete_id,
-            SegmentEffortBackfillState.status.in_(["done", "skipped"]),
         )
     )
-    finished = {row[0] for row in finished_result.all()}
-    pending = [(profile, enrichment) for profile, enrichment in rows if profile.segment_id not in finished]
+    states = {row.segment_id: row for row in state_result.scalars().all()}
+
+    effort_counts_result = await db.execute(
+        select(SegmentEffortDigest.segment_id, func.count(SegmentEffortDigest.effort_id))
+        .where(SegmentEffortDigest.athlete_id == athlete_id)
+        .group_by(SegmentEffortDigest.segment_id)
+    )
+    effort_counts = {segment_id: count for segment_id, count in effort_counts_result.all()}
+
+    def should_backfill(profile: AthleteSegmentProfile) -> bool:
+        state = states.get(profile.segment_id)
+        if state is None or state.status == "pending":
+            return True
+        if state.status == "skipped":
+            return False
+        if state.status != "done":
+            return True
+        if effort_counts.get(profile.segment_id, 0) > 0:
+            return False
+
+        # Older backfills may have marked PR-seeded segments done even when no
+        # segment-effort rows were imported. Retry once after a newer starred
+        # sync confirms the segment still has athlete_pr_effort metadata.
+        return bool(
+            profile.pr_time_s is not None
+            and sync_state
+            and sync_state.last_star_sync_at
+            and (state.completed_at is None or _ts(state.completed_at) < _ts(sync_state.last_star_sync_at))
+        )
+
+    pending = [(profile, enrichment) for profile, enrichment in rows if should_backfill(profile)]
 
     pending.sort(
         key=lambda row: (

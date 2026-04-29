@@ -218,7 +218,7 @@ A segment is a candidate if, in `athlete_segment_profile`:
 1. `is_starred = true`
 2. either `times_ridden > 0` or `pr_time_s IS NOT NULL`
 
-`times_ridden` counts imported segment-effort rows only. On first load a PR-seeded candidate can appear with `times_ridden = 0`; the UI labels that state as history pending rather than implying complete effort history.
+`times_ridden` counts imported segment-effort rows only. On first load a PR-seeded candidate can appear with `times_ridden = 0`; the UI labels that state as history pending rather than implying complete effort history. If backfill has already completed but still imported no effort rows, the UI labels the row as history unavailable.
 
 `top10_seen` and `podium_seen` are **not** default filters — they are surfaced on each card so the athlete can see their rank history. The `podium_only` filter optionally restricts to `podium_seen = true`.
 
@@ -288,6 +288,7 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
 4. Historical data comes from the daily backfill cron or the permissioned UI backfill button. Cron backfill spends at most 10 Strava calls per invocation across all athletes and rotates users round-robin.
 5. Backfill first fills missing/stale KOM-time enrichment for high-value candidates, then processes segment-effort history for gap-enriched candidates before the remaining starred segments.
+6. If a previous backfill marked a PR-seeded segment done with no imported effort rows before the latest starred sync, the segment is re-queued so older empty results can be repaired.
 
 ## Edge cases
 
@@ -296,6 +297,7 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 | `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment can still appear if ridden, without top-10/podium rank history |
 | Athlete has efforts but no power meter | `best_avg_watts = null`; card omits watts row |
 | `kom_time_s` null (no enrichment source) | gap row omitted from card |
+| Backfill done but no efforts imported | Card shows `history unavailable`; if the empty `done` state predates the latest starred sync and the segment still has `athlete_pr_effort`, the next backfill re-tries it |
 | Segment deleted from Strava | 404 from `GET /segment_efforts` → skipped, retain profile from effort history |
 | `start_latlng` null | `distance_from_home_km = null`; sort these last |
 | `HOME_LAT`/`HOME_LNG` not set | `distance_from_home_km = null` for all; disable distance sort, warn in UI |
