@@ -265,7 +265,11 @@ import Layout from "../layouts/Layout.astro";
     const latestTime = c.latest_time_display != null
       ? `<span>Last <strong class="text-gray-200">${c.latest_time_display}</strong></span>`
       : "";
-    const ridden = c.times_ridden > 0 ? `${c.times_ridden}× ridden` : "history pending";
+    const ridden = c.times_ridden > 0
+      ? `${c.times_ridden}× ridden`
+      : c.data_quality === "backfilled"
+        ? "history unavailable"
+        : "history pending";
     const gap =
       c.gap_to_kom_s != null
         ? `Gap to KOM: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`

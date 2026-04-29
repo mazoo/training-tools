@@ -163,15 +163,16 @@ This is the recent/manual sync data source for KOM/QOM signals. The response inc
 ```
 GET /segment_efforts
   ?segment_id={segment_id}
-  &start_date_local={iso_datetime}
-  &end_date_local={iso_datetime}
   &per_page=200
+  &page=1
 Headers: Authorization: Bearer {access_token}
 ```
 
 Used by daily historical backfill after starred segments are known. This endpoint returns `DetailedSegmentEffort` objects for the authenticated athlete on one segment, including `activity.id`, timing, watts, embedded `segment` metadata, `kom_rank`, and `pr_rank`.
 
-Backfill asks for a broad 365-day window with `per_page=200`. In the normal case this returns all efforts for that starred segment in one call. If Strava returns exactly 200 efforts, the result may be capped, so the service splits the date window and retries each half until each window returns fewer than 200 efforts.
+Backfill asks without a date window and paginates with `per_page=200`. In the normal case this returns all efforts for that starred segment in one call. If Strava returns exactly 200 efforts, the service requests the next page while the run still has budget. If budget is exhausted mid-segment, the segment remains pending for a later run.
+
+If an older backfill marked a PR-seeded segment `done` with no imported effort rows, the service retries it after a newer starred-segment sync confirms that `athlete_pr_effort` still exists.
 
 > **Availability:** Strava documents this endpoint as requiring a subscription. If a segment-effort request returns a permanent per-segment error such as 400/403/404, the backfill records it as skipped and continues; transient errors are retried on a later run. Recent/manual sync via detailed activities remains available.
 

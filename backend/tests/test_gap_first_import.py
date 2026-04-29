@@ -5,6 +5,13 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database import Base
+from app.models.athlete import AthleteSyncState, AthleteToken
+from app.models.segment import (
+    AthleteSegmentProfile,
+    SegmentEffortBackfillState,
+    SegmentEffortDigest,
+    SegmentEnrichment,
+)
 from app.models.athlete import AthleteSyncState, AthleteToken, AthleteZones
 from app.models.segment import AthleteSegmentProfile, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters
@@ -213,6 +220,138 @@ async def test_best_chance_prioritization_is_deterministic(db_session):
 
 
 @pytest.mark.asyncio
+async def test_stale_empty_pr_seeded_backfill_is_retried(db_session):
+    star_sync_at = datetime(2026, 4, 29, tzinfo=timezone.utc)
+    stale_done_at = datetime(2026, 4, 28, tzinfo=timezone.utc)
+    fresh_done_at = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            AthleteSyncState(
+                athlete_id=1,
+                bootstrap_done=True,
+                last_star_sync_at=star_sync_at,
+                backfill_complete=False,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=7914618,
+                segment_name="Aarwangenstrasse Climb",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=0,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=167,
+                updated_at=star_sync_at,
+            ),
+            SegmentEnrichment(
+                segment_id=7914618,
+                segment_name="Aarwangenstrasse Climb",
+                avg_grade_pct=1.3,
+                activity_type="Ride",
+                kom_time_s=160,
+                cached_at=star_sync_at,
+            ),
+            SegmentEffortBackfillState(
+                athlete_id=1,
+                segment_id=7914618,
+                status="done",
+                completed_at=stale_done_at,
+                last_attempt_at=stale_done_at,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=20,
+                segment_name="Already Imported",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=1,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=100,
+                updated_at=star_sync_at,
+            ),
+            SegmentEffortBackfillState(
+                athlete_id=1,
+                segment_id=20,
+                status="done",
+                completed_at=stale_done_at,
+                last_attempt_at=stale_done_at,
+            ),
+            SegmentEffortDigest(
+                effort_id=2000,
+                athlete_id=1,
+                segment_id=20,
+                activity_id=200,
+                effort_date=star_sync_at.date(),
+                elapsed_s=100,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=30,
+                segment_name="Fresh Empty",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=0,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=120,
+                updated_at=star_sync_at,
+            ),
+            SegmentEffortBackfillState(
+                athlete_id=1,
+                segment_id=30,
+                status="done",
+                completed_at=fresh_done_at,
+                last_attempt_at=fresh_done_at,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    segment_ids = await sync._get_pending_segment_effort_backfill_ids(db_session, 1)
+    assert segment_ids == [7914618]
+
+
+@pytest.mark.asyncio
+async def test_backfill_chunk_retries_stale_empty_when_complete(db_session, monkeypatch):
+    star_sync_at = datetime(2026, 4, 29, tzinfo=timezone.utc)
+    stale_done_at = datetime(2026, 4, 28, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            AthleteSyncState(
+                athlete_id=1,
+                bootstrap_done=True,
+                last_star_sync_at=star_sync_at,
+                backfill_complete=True,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=7914618,
+                segment_name="Aarwangenstrasse Climb",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=0,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=167,
+                updated_at=star_sync_at,
+            ),
+            SegmentEnrichment(
+                segment_id=7914618,
+                segment_name="Aarwangenstrasse Climb",
+                avg_grade_pct=1.3,
+                activity_type="Ride",
+                kom_time_s=160,
+                kom_time_checked_at=star_sync_at,
+                cached_at=star_sync_at,
+            ),
+            SegmentEffortBackfillState(
+                athlete_id=1,
+                segment_id=7914618,
+                status="done",
+                completed_at=stale_done_at,
+                last_attempt_at=stale_done_at,
 async def test_candidates_include_power_zone_difficulty(db_session):
     now = datetime(2026, 4, 1, tzinfo=timezone.utc)
     power_zones = {
@@ -281,6 +420,59 @@ async def test_candidates_include_power_zone_difficulty(db_session):
     )
     await db_session.commit()
 
+    class FakeStravaClient:
+        def __init__(self, access_token: str) -> None:
+            self.access_token = access_token
+
+        async def get_segment_efforts(
+            self,
+            segment_id: int,
+            per_page: int = 200,
+            page: int = 1,
+        ) -> list[dict]:
+            assert segment_id == 7914618
+            if page > 1:
+                return []
+            return [
+                {
+                    "id": 3265372731392868352,
+                    "activity": {"id": 12300336835},
+                    "elapsed_time": 167,
+                    "moving_time": 167,
+                    "average_watts": 295.8,
+                    "kom_rank": 5,
+                    "pr_rank": None,
+                    "start_date": "2024-09-01T16:20:12Z",
+                    "segment": {
+                        "id": 7914618,
+                        "name": "Aarwangenstrasse Climb",
+                        "activity_type": "Ride",
+                        "distance": 1764.7,
+                        "average_grade": 1.3,
+                        "maximum_grade": 6.3,
+                        "start_latlng": [47.259465, 7.707584],
+                        "city": "Niederbipp",
+                        "country": "Switzerland",
+                        "climb_category": 0,
+                    },
+                }
+            ]
+
+    monkeypatch.setattr(sync, "StravaClient", FakeStravaClient)
+
+    task = TaskStatus(task_id="backfill")
+    await sync.run_backfill_chunk(db_session, athlete_id=1, access_token="token", task=task)
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+    assert task.status == "done"
+    assert task.strava_calls_made == 1
+    assert candidate.segment_id == 7914618
+    assert candidate.times_ridden == 1
+    assert candidate.best_time_s == 167
+    assert candidate.best_avg_watts == 295.8
+    assert candidate.top10_seen is True
+    assert candidate.podium_seen is False
     response = await get_candidates(db_session, 1, CandidateFilters())
     by_id = {candidate.segment_id: candidate for candidate in response.candidates}
 
