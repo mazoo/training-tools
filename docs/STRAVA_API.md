@@ -48,7 +48,7 @@ After each response, `rate_limiter.sync_from_headers(headers)` overwrites the lo
 
 Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
 
-The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150.
+Gap-first onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, then KOM-time enrichment calls for the highest-value PR-seeded segments. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150 and spends at most 10 calls per invocation across all athletes.
 
 ### Staying safe
 
@@ -78,9 +78,18 @@ Important fields:
   "start_latlng": [46.123, 7.456],
   "city": "Villars-sur-Ollon",
   "country": "Switzerland",
-  "starred": true
+  "starred": true,
+  "starred_date": "2026-04-01T10:00:00Z",
+  "athlete_pr_effort": {
+    "activity_id": 7419766464,
+    "elapsed_time": 431,
+    "start_date": "2022-07-05T15:32:49Z",
+    "is_kom": false
+  }
 }
 ```
+
+`athlete_pr_effort` is the primary first-load seed: it gives the athlete's known PR time/date/activity on starred segments without calling activity detail or segment-effort endpoints. When `athlete_pr_effort.is_kom` is true, the app infers `kom_time_s = pr_time_s` and gap `0` without calling `GET /segments/{id}`.
 
 ### Detailed activity — recent sync source of rank and watts data
 
@@ -145,7 +154,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used by the KOM-time backfill for ridden starred segments, cached **7 days**. Each backfill run calls this endpoint for at most 10 segments, ordered by podium history first, then top-10 history, then the remaining ridden starred segments.
+Used by gap-first onboarding and later KOM-time backfill, cached **7 days**. Onboarding spends remaining calls from its 150-call budget here after starred segments are synced. Background cron backfill spends at most 10 calls per invocation across all athletes, prioritizing high-value candidates first.
 
 ```json
 {
@@ -169,7 +178,7 @@ Used by the KOM-time backfill for ridden starred segments, cached **7 days**. Ea
 }
 ```
 
-**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s` and update `kom_time_checked_at` so the segment is not retried until the cache expires. Note: `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s`.
+**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s` and update `kom_time_checked_at` so the segment is not retried until the cache expires. Note: `gap_to_kom_s` is **not stored** — it is computed at query time from imported `best_time_s` when available, otherwise from seeded `pr_time_s`.
 
 Parsing `xoms.kom` to seconds:
 ```python

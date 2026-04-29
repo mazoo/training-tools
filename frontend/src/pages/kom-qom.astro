@@ -216,6 +216,16 @@ import Layout from "../layouts/Layout.astro";
     return "";
   }
 
+  function qualityBadge(c: any): string {
+    if (c.data_quality === "seeded") {
+      return `<span class="text-gray-500 text-xs">PR seeded</span>`;
+    }
+    if (c.data_quality === "enriched") {
+      return `<span class="text-gray-500 text-xs">Gap enriched</span>`;
+    }
+    return "";
+  }
+
   function powerIcon(): string {
     return `
       <svg aria-hidden="true" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-amber-300">
@@ -227,6 +237,12 @@ import Layout from "../layouts/Layout.astro";
     const dist = c.distance_from_home_km != null ? `${c.distance_from_home_km} km` : "—";
     const grade = c.average_grade != null ? `${c.average_grade.toFixed(1)}%` : "—";
     const distSeg = c.distance_m != null ? `${(c.distance_m / 1000).toFixed(1)} km` : "—";
+    const primaryTimeLabel = c.best_time_display != null ? "Best" : c.pr_time_display != null ? "PR" : "Best";
+    const primaryTime = c.best_time_display ?? c.pr_time_display ?? "—";
+    const latestTime = c.latest_time_display != null
+      ? `<span>Last <strong class="text-gray-200">${c.latest_time_display}</strong></span>`
+      : "";
+    const ridden = c.times_ridden > 0 ? `${c.times_ridden}× ridden` : "history pending";
     const gap =
       c.gap_to_kom_s != null
         ? `Gap to KOM: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`
@@ -244,6 +260,7 @@ import Layout from "../layouts/Layout.astro";
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="flex items-center gap-2 min-w-0">
             ${rankBadge(c)}
+            ${qualityBadge(c)}
             <a href="${c.segment_url}" target="_blank" rel="noopener"
                class="text-white font-medium hover:text-sky-400 transition-colors truncate">
               ${c.segment_name}
@@ -252,9 +269,9 @@ import Layout from "../layouts/Layout.astro";
           <span class="text-gray-500 text-sm shrink-0">${dist} from home</span>
         </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
-          <span>Best <strong class="text-gray-200">${c.best_time_display ?? "—"}</strong></span>
-          <span>Last <strong class="text-gray-200">${c.latest_time_display ?? "—"}</strong></span>
-          <span>${c.times_ridden}× ridden</span>
+          <span>${primaryTimeLabel} <strong class="text-gray-200">${primaryTime}</strong></span>
+          ${latestTime}
+          <span>${ridden}</span>
           ${watts ? `<span>${watts}</span>` : ""}
         </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
@@ -297,7 +314,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function initSliders(candidates: any[]) {
-    const times = candidates.map((c) => c.best_time_s).filter((t) => t != null) as number[];
+    const times = candidates.map((c) => c.best_time_s ?? c.pr_time_s).filter((t) => t != null) as number[];
     const grades = candidates.map((c) => c.average_grade).filter((g) => g != null) as number[];
 
     timeAbsMin = times.length ? Math.floor(Math.min(...times) / 60) : 0;
@@ -375,9 +392,10 @@ import Layout from "../layouts/Layout.astro";
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (!f.komIncluded && c.is_kom) return false;
       if (f.ridesOnly && c.activity_type === "Run") return false;
-      if (c.best_time_s != null) {
-        if (f.timeMinVal > timeAbsMin && c.best_time_s < f.timeMinVal * 60) return false;
-        if (f.timeMaxVal < timeAbsMax && c.best_time_s > f.timeMaxVal * 60) return false;
+      const knownTime = c.best_time_s ?? c.pr_time_s;
+      if (knownTime != null) {
+        if (f.timeMinVal > timeAbsMin && knownTime < f.timeMinVal * 60) return false;
+        if (f.timeMaxVal < timeAbsMax && knownTime > f.timeMaxVal * 60) return false;
       }
       if (c.average_grade != null) {
         if (f.gradMinVal > gradAbsMin && c.average_grade < f.gradMinVal) return false;

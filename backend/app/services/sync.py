@@ -22,13 +22,15 @@ logger = logging.getLogger(__name__)
 
 _FULL_REFRESH_DAYS = 30     # lookback window used when full=True is requested
 _MAX_PAGES = 5
+_STARRED_SEGMENTS_PER_PAGE = 200
 _SEGMENT_EFFORTS_PER_PAGE = 200
+ONBOARDING_STRAVA_CALL_BUDGET = 150
+BACKFILL_CALLS_PER_15MIN_WINDOW = 10
 # Stop a backfill run if fewer than this many daily calls remain — leaves
 # headroom for ongoing syncs and starred-segment enrichment.
 MIN_DAILY_BACKFILL_BUDGET = 150
-_MAX_SEGMENTS_PER_BACKFILL_RUN = 75
-_MAX_KOM_TIME_SEGMENTS_PER_BACKFILL_RUN = 10
 _KOM_TIME_TTL = timedelta(days=7)
+_BACKFILL_ROUND_ROBIN_INDEX = 0
 
 
 def _now() -> datetime:
@@ -56,15 +58,17 @@ async def run_sync(
     """
     User-triggered sync.
 
-    Bootstrap (first connect): syncs starred segments only (1 call). Effort
-    history is populated separately by the backfill via GET /segment_efforts.
+    Bootstrap (first connect): spends up to ONBOARDING_STRAVA_CALL_BUDGET
+    calls on a gap-first first dataset. It fetches starred segments for free
+    athlete PR metadata, then uses remaining calls for KOM-time enrichment.
+    Effort history density is populated separately by the slow backfill.
 
     Incremental (subsequent calls): syncs starred segments + activities newer
     than last_activity_sync_at, so today's rides appear without waiting for
     the next backfill run.
 
     Request order (incremental):
-      1. GET /segments/starred   — 1 call (geometry + PR data free)
+      1. GET /segments/starred   — paginated (geometry + PR data free)
       2. GET /athlete/activities — 1–5 calls
       3. GET /activities/{id}    — 1 per new activity
       4. Profile recomputation   — local, 0 calls
@@ -74,8 +78,7 @@ async def run_sync(
 
         task.status = "running"
         logger.info("athlete=%d syncing starred segments", athlete_id)
-        starred = await client.get_starred_segments()
-        task.strava_calls_made += 1
+        starred = await _fetch_starred_segments(client, task)
         starred_ids = {s["id"] for s in starred}
         await _update_starred_flags(db, athlete_id, starred)
 
@@ -89,7 +92,19 @@ async def run_sync(
             for segment_id in touched:
                 await _recompute_profile(db, athlete_id, segment_id, starred_ids)
         else:
-            logger.info("athlete=%d bootstrap: skipping activity fetch; backfill will cover history", athlete_id)
+            remaining_budget = max(0, ONBOARDING_STRAVA_CALL_BUDGET - task.strava_calls_made)
+            logger.info(
+                "athlete=%d bootstrap: enriching KOM times with %d remaining onboarding calls",
+                athlete_id,
+                remaining_budget,
+            )
+            await _run_initial_kom_time_enrichment(
+                db,
+                client,
+                athlete_id,
+                task,
+                call_budget=remaining_budget,
+            )
 
         await _upsert_sync_state(db, athlete_id)
         if task.status == "running":
@@ -112,13 +127,22 @@ async def _backfill_one_segment(
     segment_id: int,
     starred_ids: set[int],
     task: TaskStatus,
+    call_budget: int | None = None,
 ) -> None:
     try:
         await _mark_segment_effort_backfill_attempt(db, athlete_id, segment_id)
-        touched = await _fetch_segment_efforts_paged(db, client, athlete_id, segment_id, task)
+        touched, complete = await _fetch_segment_efforts_paged(
+            db,
+            client,
+            athlete_id,
+            segment_id,
+            task,
+            call_budget=call_budget,
+        )
         for touched_segment_id in touched:
             await _recompute_profile(db, athlete_id, touched_segment_id, starred_ids)
-        await _mark_segment_effort_backfill_done(db, athlete_id, segment_id)
+        if complete:
+            await _mark_segment_effort_backfill_done(db, athlete_id, segment_id)
     except StravaRateLimitError:
         raise
     except Exception as exc:
@@ -155,12 +179,12 @@ async def run_backfill_chunk(
     athlete_id: int,
     access_token: str,
     task: TaskStatus,
+    call_budget: int | None = None,
 ) -> None:
     """
-    Fetch up to _MAX_KOM_TIME_SEGMENTS_PER_BACKFILL_RUN segment details using
-    GET /segments/{id} to populate KOM-time enrichment for gap-to-KOM.
-    Then fetch up to _MAX_SEGMENTS_PER_BACKFILL_RUN pending starred segments
-    using GET /segment_efforts (no date filter, per_page=200, paginated).
+    Advance one athlete's enrichment/backfill work, optionally capped by a
+    per-task Strava call budget. Daily background runs pass a small budget so
+    a few parallel users can share the app-wide 15-minute window safely.
 
     Called by run_daily_backfill; also callable directly for testing.
     No-ops if initial sync hasn't run yet or no backfill work remains.
@@ -177,29 +201,44 @@ async def run_backfill_chunk(
         starred_ids = await _get_starred_ids(db, athlete_id)
         processed = 0
 
-        kom_segment_ids = (await _get_pending_kom_time_backfill_ids(db, athlete_id))[
-            :_MAX_KOM_TIME_SEGMENTS_PER_BACKFILL_RUN
-        ]
+        kom_segment_ids = await _get_pending_kom_time_backfill_ids(db, athlete_id)
+        if call_budget is not None:
+            kom_segment_ids = kom_segment_ids[:call_budget]
         task.activities_total = len(kom_segment_ids)
 
         if kom_segment_ids:
             logger.info("athlete=%d KOM-time backfill: %d segments", athlete_id, len(kom_segment_ids))
 
         for segment_id in kom_segment_ids:
+            if _call_budget_exhausted(task, call_budget):
+                break
             await _backfill_one_segment_kom_time(db, client, athlete_id, segment_id, task)
             processed += 1
             task.activities_processed = processed
 
         segment_ids: list[int] = []
-        if not sync_state.backfill_complete:
-            segment_ids = (await _get_pending_segment_effort_backfill_ids(db, athlete_id))[:_MAX_SEGMENTS_PER_BACKFILL_RUN]
+        if not sync_state.backfill_complete and not _call_budget_exhausted(task, call_budget):
+            remaining_call_budget = _remaining_call_budget(task, call_budget)
+            segment_ids = await _get_pending_segment_effort_backfill_ids(db, athlete_id)
+            if remaining_call_budget is not None:
+                segment_ids = segment_ids[:remaining_call_budget]
             task.activities_total += len(segment_ids)
 
             if segment_ids:
                 logger.info("athlete=%d segment-effort backfill: %d segments", athlete_id, len(segment_ids))
 
             for segment_id in segment_ids:
-                await _backfill_one_segment(db, client, athlete_id, segment_id, starred_ids, task)
+                if _call_budget_exhausted(task, call_budget):
+                    break
+                await _backfill_one_segment(
+                    db,
+                    client,
+                    athlete_id,
+                    segment_id,
+                    starred_ids,
+                    task,
+                    call_budget=call_budget,
+                )
                 processed += 1
                 task.activities_processed = processed
 
@@ -223,19 +262,30 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
     Process one backfill chunk per athlete that still needs historical data.
     Designed to be called once per day by the cron endpoint.
 
-    Multi-user budget safety: athletes are processed one at a time. If the
-    shared daily budget drops below MIN_DAILY_BACKFILL_BUDGET, remaining athletes are
-    skipped and will be retried the next day.
+    Multi-user budget safety: at most BACKFILL_CALLS_PER_15MIN_WINDOW calls are
+    spent per invocation across all athletes. Athletes are rotated round-robin
+    so one dense account cannot starve another account indefinitely.
     """
     from app.services.auth import get_valid_access_token
 
+    global _BACKFILL_ROUND_ROBIN_INDEX
+
     result = await db.execute(select(AthleteToken))
-    all_tokens = result.scalars().all()
+    all_tokens = sorted(result.scalars().all(), key=lambda row: row.athlete_id)
+    if not all_tokens:
+        return {}
+
+    start_index = _BACKFILL_ROUND_ROBIN_INDEX % len(all_tokens)
+    token_rows = all_tokens[start_index:] + all_tokens[:start_index]
 
     outcomes: dict[int, str] = {}
+    calls_spent = 0
 
-    for token_row in all_tokens:
+    for offset, token_row in enumerate(token_rows):
         athlete_id = token_row.athlete_id
+        if calls_spent >= BACKFILL_CALLS_PER_15MIN_WINDOW:
+            outcomes[athlete_id] = "budget_deferred"
+            continue
 
         sync_state = await _get_sync_state(db, athlete_id)
         if not sync_state or not sync_state.bootstrap_done:
@@ -256,8 +306,18 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
         task = create_task()
         try:
             access_token = await get_valid_access_token(athlete_id, db)
-            await run_backfill_chunk(db, athlete_id, access_token, task)
+            remaining_window_budget = BACKFILL_CALLS_PER_15MIN_WINDOW - calls_spent
+            await run_backfill_chunk(
+                db,
+                athlete_id,
+                access_token,
+                task,
+                call_budget=remaining_window_budget,
+            )
+            calls_spent += task.strava_calls_made
             outcomes[athlete_id] = task.status
+            if task.strava_calls_made > 0:
+                _BACKFILL_ROUND_ROBIN_INDEX = (start_index + offset + 1) % len(all_tokens)
         except Exception as exc:
             logger.exception("athlete=%d daily backfill failed", athlete_id)
             outcomes[athlete_id] = f"error: {exc}"
@@ -267,11 +327,65 @@ async def run_daily_backfill(db: AsyncSession) -> dict[int, str]:
 
 # ── orchestration helpers ──────────────────────────────────────────────────────
 
+def _remaining_call_budget(task: TaskStatus, call_budget: int | None) -> int | None:
+    if call_budget is None:
+        return None
+    return max(0, call_budget - task.strava_calls_made)
+
+
+def _call_budget_exhausted(task: TaskStatus, call_budget: int | None) -> bool:
+    remaining = _remaining_call_budget(task, call_budget)
+    return remaining is not None and remaining <= 0
+
+
 def _compute_after_ts(sync_state: AthleteSyncState, full: bool) -> int:
     fallback = int((_now() - timedelta(days=_FULL_REFRESH_DAYS)).timestamp())
     if full or not sync_state.last_activity_sync_at:
         return fallback
     return int(sync_state.last_activity_sync_at.timestamp())
+
+
+async def _fetch_starred_segments(
+    client: StravaClient,
+    task: TaskStatus,
+) -> list[dict]:
+    starred: list[dict] = []
+    page = 1
+    while True:
+        page_data = await client.get_starred_segments_page(
+            page=page,
+            per_page=_STARRED_SEGMENTS_PER_PAGE,
+        )
+        task.strava_calls_made += 1
+        if not page_data:
+            break
+        starred.extend(page_data)
+        if len(page_data) < _STARRED_SEGMENTS_PER_PAGE:
+            break
+        page += 1
+    return starred
+
+
+async def _run_initial_kom_time_enrichment(
+    db: AsyncSession,
+    client: StravaClient,
+    athlete_id: int,
+    task: TaskStatus,
+    call_budget: int,
+) -> None:
+    if call_budget <= 0:
+        return
+
+    segment_ids = (await _get_pending_kom_time_backfill_ids(db, athlete_id))[:call_budget]
+    if not segment_ids:
+        return
+
+    task.activities_total = len(segment_ids)
+    for segment_id in segment_ids:
+        if _call_budget_exhausted(task, ONBOARDING_STRAVA_CALL_BUDGET):
+            break
+        await _backfill_one_segment_kom_time(db, client, athlete_id, segment_id, task)
+        task.activities_processed += 1
 
 
 async def _fetch_activities(
@@ -320,17 +434,19 @@ async def _fetch_segment_efforts_paged(
     athlete_id: int,
     segment_id: int,
     task: TaskStatus,
-) -> set[int]:
+    call_budget: int | None = None,
+) -> tuple[set[int], bool]:
     touched: set[int] = set()
     page = 1
     while True:
+        if _call_budget_exhausted(task, call_budget):
+            return touched, False
         efforts = await client.get_segment_efforts(segment_id=segment_id, per_page=_SEGMENT_EFFORTS_PER_PAGE, page=page)
         task.strava_calls_made += 1
         touched.update(await _process_segment_efforts(db, athlete_id, efforts))
         if len(efforts) < _SEGMENT_EFFORTS_PER_PAGE:
-            break
+            return touched, True
         page += 1
-    return touched
 
 
 def _latlng(raw: object) -> tuple[float | None, float | None]:
@@ -360,9 +476,69 @@ async def _get_starred_ids(db: AsyncSession, athlete_id: int) -> set[int]:
 _ACTIVITY_TYPE_PRIORITY = {"Ride": 0, "Run": 1}
 
 
+def _ts(value: datetime | None) -> float:
+    return value.timestamp() if value else 0.0
+
+
+def _known_effort_time_s(profile: AthleteSegmentProfile) -> int | None:
+    return profile.best_time_s or profile.pr_time_s
+
+
+def _duration_bucket(seconds: int | None) -> int:
+    if seconds is None:
+        return 4
+    if 20 <= seconds <= 1800:
+        return 0
+    if 1800 < seconds <= 3600:
+        return 1
+    if seconds < 20:
+        return 2
+    return 3
+
+
+def _grade_bucket(grade: float | None) -> int:
+    if grade is None:
+        return 2
+    if -5.0 <= grade <= 12.0:
+        return 0
+    if -10.0 <= grade <= 18.0:
+        return 1
+    return 2
+
+
+def _best_chance_sort_key(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+) -> tuple:
+    known_time = _known_effort_time_s(profile)
+    activity_type = enrichment.activity_type if enrichment else None
+    latest_interest = max(
+        _ts(profile.pr_date),
+        _ts(profile.starred_date),
+        _ts(profile.last_ridden_at),
+    )
+    return (
+        0 if profile.pr_time_s is not None else 1,
+        1 if profile.is_indoor else 0,
+        _ACTIVITY_TYPE_PRIORITY.get(activity_type or "", 2),
+        _duration_bucket(known_time),
+        _grade_bucket(enrichment.avg_grade_pct if enrichment else None),
+        known_time if known_time is not None else 999_999_999,
+        -latest_interest,
+        profile.segment_id,
+    )
+
+
+def _has_kom_time(profile: AthleteSegmentProfile, enrichment: SegmentEnrichment | None) -> bool:
+    return bool(
+        (enrichment and enrichment.kom_time_s is not None)
+        or (profile.is_kom and profile.pr_time_s is not None)
+    )
+
+
 async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
     profiles_result = await db.execute(
-        select(AthleteSegmentProfile, SegmentEnrichment.activity_type)
+        select(AthleteSegmentProfile, SegmentEnrichment)
         .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
         .where(
             AthleteSegmentProfile.athlete_id == athlete_id,
@@ -378,15 +554,12 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
         )
     )
     finished = {row[0] for row in finished_result.all()}
-    pending = [(profile, activity_type) for profile, activity_type in rows if profile.segment_id not in finished]
+    pending = [(profile, enrichment) for profile, enrichment in rows if profile.segment_id not in finished]
 
     pending.sort(
         key=lambda row: (
-            1 if row[0].is_indoor else 0,
-            _ACTIVITY_TYPE_PRIORITY.get(row[1] or "", 2),
-            0 if row[0].is_kom else 1,
-            -(row[0].starred_date.timestamp() if row[0].starred_date else 0),
-            row[0].segment_id,
+            0 if _has_kom_time(row[0], row[1]) else 1,
+            *_best_chance_sort_key(row[0], row[1]),
         )
     )
     return [profile.segment_id for profile, _ in pending]
@@ -395,12 +568,17 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
 async def _get_pending_kom_time_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
     stale_before = _now() - _KOM_TIME_TTL
     result = await db.execute(
-        select(AthleteSegmentProfile, SegmentEnrichment.activity_type)
+        select(AthleteSegmentProfile, SegmentEnrichment)
         .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
         .where(
             AthleteSegmentProfile.athlete_id == athlete_id,
             AthleteSegmentProfile.is_starred.is_(True),
-            AthleteSegmentProfile.times_ridden > 0,
+            AthleteSegmentProfile.is_kom.is_(False),
+            or_(
+                AthleteSegmentProfile.pr_time_s.is_not(None),
+                AthleteSegmentProfile.best_time_s.is_not(None),
+                AthleteSegmentProfile.times_ridden > 0,
+            ),
             or_(
                 SegmentEnrichment.kom_time_checked_at.is_(None),
                 SegmentEnrichment.kom_time_checked_at < stale_before,
@@ -412,11 +590,8 @@ async def _get_pending_kom_time_backfill_ids(db: AsyncSession, athlete_id: int) 
         key=lambda row: (
             0 if row[0].podium_seen else 1,
             0 if row[0].top10_seen else 1,
-            1 if row[0].is_indoor else 0,
-            _ACTIVITY_TYPE_PRIORITY.get(row[1] or "", 2),
             row[0].best_seen_kom_rank or 99,
-            -(row[0].last_ridden_at.timestamp() if row[0].last_ridden_at else 0),
-            row[0].segment_id,
+            *_best_chance_sort_key(row[0], row[1]),
         )
     )
     return [profile.segment_id for profile, _ in pending]
@@ -623,10 +798,27 @@ async def _update_starred_flags(
             "activity_type": seg.get("activity_type"),
             "hazardous": seg.get("hazardous"),
         }
+        enrichment_values = {
+            "segment_id": seg_id,
+            "kom_time_s": pr_time_s if is_kom and pr_time_s else None,
+            "kom_time_checked_at": now if is_kom and pr_time_s else None,
+            "cached_at": now,
+            **enrichment_update,
+        }
+        enrichment_conflict_update = dict(enrichment_update)
+        if is_kom and pr_time_s:
+            # If the athlete currently owns the KOM/QOM, their PR is the
+            # current XOM time, so gap-to-KOM is known without a detail call.
+            enrichment_conflict_update.update(
+                {
+                    "kom_time_s": pr_time_s,
+                    "kom_time_checked_at": now,
+                }
+            )
         await db.execute(
             sqlite_insert(SegmentEnrichment)
-            .values(segment_id=seg_id, kom_time_s=None, cached_at=now, **enrichment_update)
-            .on_conflict_do_update(index_elements=["segment_id"], set_=enrichment_update)
+            .values(**enrichment_values)
+            .on_conflict_do_update(index_elements=["segment_id"], set_=enrichment_conflict_update)
         )
 
     if starred:

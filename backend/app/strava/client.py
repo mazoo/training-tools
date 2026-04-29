@@ -37,13 +37,18 @@ class StravaClient:
     async def get_athlete(self) -> dict:
         return await self._get("/athlete")
 
+    async def get_starred_segments_page(
+        self,
+        page: int = 1,
+        per_page: int = 200,
+    ) -> list[dict]:
+        return await self._get("/segments/starred", {"page": page, "per_page": per_page})
+
     async def get_starred_segments(self) -> list[dict]:
         results: list[dict] = []
         page = 1
         while True:
-            page_data = await self._get(
-                "/segments/starred", {"page": page, "per_page": 200}
-            )
+            page_data = await self.get_starred_segments_page(page=page, per_page=200)
             if not page_data:
                 break
             results.extend(page_data)

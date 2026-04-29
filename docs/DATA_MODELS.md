@@ -161,7 +161,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 
 ## `segment_enrichment` — `SegmentEnrichment` (`models/segment.py`)
 
-Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is populated by the backfill from `GET /segments/{id}` for up to 10 ridden starred segments per run, ordered by podium history first, then top-10 history, then the remaining ridden segments. `gap_to_kom_s` is **not stored** — computed at query time.
+Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is populated during gap-first onboarding and later backfill from `GET /segments/{id}`; for current KOM/QOM holders it is inferred from starred `athlete_pr_effort.pr_time_s` without a detail call. `gap_to_kom_s` is **not stored** — computed at query time.
 
 | Column | Type | Notes |
 |--------|------|-------|

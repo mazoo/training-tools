@@ -1,22 +1,23 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.athlete import AthleteProfile
-from app.models.segment import AthleteSegmentProfile, SegmentEnrichment
+from app.models.segment import AthleteSegmentProfile, SegmentEffortBackfillState, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters, CandidatesResponse, SegmentCandidate
 from app.utils import haversine_km, seconds_to_display
 
 
 def _apply_filters(stmt, filters: CandidateFilters):
+    known_time_s = func.coalesce(AthleteSegmentProfile.best_time_s, AthleteSegmentProfile.pr_time_s)
     if filters.podium_only:
         stmt = stmt.where(AthleteSegmentProfile.podium_seen == True)
     if filters.effort_time_min is not None:
-        stmt = stmt.where(AthleteSegmentProfile.best_time_s >= filters.effort_time_min)
+        stmt = stmt.where(known_time_s >= filters.effort_time_min)
     if filters.effort_time_max is not None:
-        stmt = stmt.where(AthleteSegmentProfile.best_time_s <= filters.effort_time_max)
+        stmt = stmt.where(known_time_s <= filters.effort_time_max)
     if filters.gradient_min is not None:
         stmt = stmt.where(SegmentEnrichment.avg_grade_pct >= filters.gradient_min)
     if filters.gradient_max is not None:
@@ -47,20 +48,47 @@ def _distance_from_home(
 def _gap_to_kom(
     profile: AthleteSegmentProfile, enrichment: SegmentEnrichment | None
 ) -> tuple[int | None, float | None]:
-    kom_time_s = enrichment.kom_time_s if enrichment else None
-    if not kom_time_s or not profile.best_time_s:
+    kom_time_s = _known_kom_time_s(profile, enrichment)
+    known_time_s = profile.best_time_s or profile.pr_time_s
+    if not kom_time_s or not known_time_s:
         return None, None
-    gap_s = profile.best_time_s - kom_time_s
+    gap_s = 0 if profile.is_kom and profile.pr_time_s else known_time_s - kom_time_s
     return gap_s, round(gap_s / kom_time_s * 100, 1)
+
+
+def _known_kom_time_s(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+) -> int | None:
+    if enrichment and enrichment.kom_time_s is not None:
+        return enrichment.kom_time_s
+    if profile.is_kom and profile.pr_time_s is not None:
+        return profile.pr_time_s
+    return None
+
+
+def _data_quality(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+    backfill_state: SegmentEffortBackfillState | None,
+) -> str:
+    if backfill_state and backfill_state.status == "done":
+        return "backfilled"
+    if _known_kom_time_s(profile, enrichment) is not None:
+        return "enriched"
+    if profile.times_ridden > 0:
+        return "imported"
+    return "seeded"
 
 
 def _build_candidate(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
+    backfill_state: SegmentEffortBackfillState | None,
     home_lat: float | None,
     home_lng: float | None,
 ) -> SegmentCandidate:
-    kom_time_s = enrichment.kom_time_s if enrichment else None
+    kom_time_s = _known_kom_time_s(profile, enrichment)
     gap_to_kom_s, gap_to_kom_pct = _gap_to_kom(profile, enrichment)
     seg_name = (
         (enrichment.segment_name if enrichment and enrichment.segment_name else None)
@@ -76,6 +104,7 @@ def _build_candidate(
         best_seen_kom_rank=profile.best_seen_kom_rank,
         last_seen_kom_rank=profile.last_seen_kom_rank,
         is_kom=profile.is_kom,
+        data_quality=_data_quality(profile, enrichment, backfill_state),
         best_time_s=profile.best_time_s,
         best_time_display=seconds_to_display(profile.best_time_s),
         latest_time_s=profile.latest_time_s,
@@ -131,23 +160,33 @@ async def get_candidates(
     )
 
     stmt = (
-        select(AthleteSegmentProfile, SegmentEnrichment)
+        select(AthleteSegmentProfile, SegmentEnrichment, SegmentEffortBackfillState)
         .outerjoin(
             SegmentEnrichment,
             AthleteSegmentProfile.segment_id == SegmentEnrichment.segment_id,
         )
+        .outerjoin(
+            SegmentEffortBackfillState,
+            and_(
+                SegmentEffortBackfillState.athlete_id == AthleteSegmentProfile.athlete_id,
+                SegmentEffortBackfillState.segment_id == AthleteSegmentProfile.segment_id,
+            ),
+        )
         .where(
             AthleteSegmentProfile.athlete_id == athlete_id,
             AthleteSegmentProfile.is_starred == True,
-            AthleteSegmentProfile.times_ridden > 0,
+            or_(
+                AthleteSegmentProfile.times_ridden > 0,
+                AthleteSegmentProfile.pr_time_s.is_not(None),
+            ),
         )
     )
     stmt = _apply_filters(stmt, filters)
 
     result = await db.execute(stmt)
     candidates = [
-        _build_candidate(profile, enrichment, home_lat, home_lng)
-        for profile, enrichment in result.all()
+        _build_candidate(profile, enrichment, backfill_state, home_lat, home_lng)
+        for profile, enrichment, backfill_state in result.all()
     ]
     candidates.sort(key=lambda c: (
         not c.is_kom,

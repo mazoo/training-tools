@@ -42,6 +42,7 @@ Show the athlete a list of their starred Strava segments where they have histori
       "best_seen_kom_rank": 2,
       "last_seen_kom_rank": 3,
       "is_kom": false,
+      "data_quality": "backfilled",
       "best_time_s": 847,
       "best_time_display": "14:07",
       "latest_time_s": 901,
@@ -78,8 +79,9 @@ Show the athlete a list of their starred Strava segments where they have histori
 ```
 
 Notes:
+- `data_quality` is one of `seeded`, `enriched`, `imported`, or `backfilled`. `seeded` means the candidate came from starred PR metadata before segment efforts were imported; `enriched` means gap-to-KOM is known; `backfilled` means the segment-effort backfill is done for that segment.
 - `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if `xoms` enrichment is unavailable.
-- `gap_to_kom_pct` is `(best_time_s - kom_time_s) / kom_time_s * 100`, expressing how far off KOM the athlete is as a percentage.
+- `gap_to_kom_pct` is `(known_time_s - kom_time_s) / kom_time_s * 100`, where `known_time_s` is imported `best_time_s` when available and seeded `pr_time_s` otherwise.
 - `is_kom` reflects Strava's `athlete_pr_effort.is_kom` from the starred segment response — true if the athlete currently holds the KOM.
 - `pr_time_s` is Strava's authoritative all-time PR for the athlete; may differ from `best_time_s` if history predates our sync window.
 - `pr_time_s`, `pr_date`, `starred_date` may be `null` for segments starred before the first sync or with no recorded PR.
@@ -214,7 +216,9 @@ Filters are applied client-side — all candidates are fetched once on page load
 
 A segment is a candidate if, in `athlete_segment_profile`:
 1. `is_starred = true`
-2. `times_ridden > 0`
+2. either `times_ridden > 0` or `pr_time_s IS NOT NULL`
+
+`times_ridden` counts imported segment-effort rows only. On first load a PR-seeded candidate can appear with `times_ridden = 0`; the UI labels that state as history pending rather than implying complete effort history.
 
 `top10_seen` and `podium_seen` are **not** default filters — they are surfaced on each card so the athlete can see their rank history. The `podium_only` filter optionally restricts to `podium_seen = true`.
 
@@ -247,12 +251,13 @@ Latest values come from the effort with the most recent `effort_date`.
 ### Gap to KOM (enrichment, may be null)
 
 ```python
-# Only if xoms.kom is present in GET /segments/{id} response
+# If xoms.kom is present in GET /segments/{id} response
 kom_time_s = xom_to_seconds(segment["xoms"]["kom"])
-gap_to_kom_s = profile.best_time_s - kom_time_s  # 0 if athlete holds KOM
+known_time_s = profile.best_time_s or profile.pr_time_s
+gap_to_kom_s = known_time_s - kom_time_s
 ```
 
-If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null`, `kom_time_checked_at` is updated, and the frontend omits the gap row on the card.
+If `athlete_pr_effort.is_kom = true` from the starred segment response, the app stores `kom_time_s = pr_time_s` and returns gap `0` without calling `GET /segments/{id}`. If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null`, `kom_time_checked_at` is updated, and the frontend omits the gap row on the card.
 
 ### Distance from home (Haversine)
 
@@ -278,11 +283,11 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first connect (`bootstrap_done = false`), `run_sync` syncs starred segments only (1 Strava call). Effort history is populated by the backfill via `GET /segment_efforts` — no activity fetch on bootstrap.
+1. On first connect (`bootstrap_done = false`), `run_sync` uses a 150-call gap-first onboarding budget: fetch starred segments, seed PR/current-KOM data from `athlete_pr_effort`, infer gap `0` for current KOM/QOM holders, then spend remaining calls on `GET /segments/{id}` for best-chance PR-seeded candidates.
 2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
-4. Historical data (365-day lookback) comes from the daily backfill cron or the permissioned UI backfill button. It processes starred segments directly with broad `GET /segment_efforts?per_page=200` windows, marking each segment done/skipped so rate-limited runs resume at the next pending segment.
-5. The same backfill run first enriches up to 10 ridden starred segments with `GET /segments/{id}` for `xoms.kom`, ordered by `podium_seen`, then `top10_seen`, then the remaining ridden segments.
+4. Historical data comes from the daily backfill cron or the permissioned UI backfill button. Cron backfill spends at most 10 Strava calls per invocation across all athletes and rotates users round-robin.
+5. Backfill first fills missing/stale KOM-time enrichment for high-value candidates, then processes segment-effort history for gap-enriched candidates before the remaining starred segments.
 
 ## Edge cases
 

@@ -1,0 +1,52 @@
+You are working in `/Users/bnl/projects/training-tools/training-tools`.
+
+Goal: optimize KOM/QOM initial data loading and ongoing refresh so new users get a useful first candidate set with minimal Strava API calls, while the app stays safely below Strava’s shared app limits with a few parallel users.
+
+Important repo context:
+- Read `README.md`, `docs/ARCHITECTURE.md`, `docs/STRAVA_API.md`, `docs/DATA_MODELS.md`, `docs/CONVENTIONS.md`, and `docs/features/KOM_QOM_CANDIDATES.md`.
+- Current flow lives mainly in `backend/app/services/sync.py`, `backend/app/strava/client.py`, `backend/app/strava/rate_limiter.py`, `backend/app/routers/kom_qom.py`, and `backend/app/models/segment.py`.
+- Do not run `git commit` or `git push`.
+
+Current observed data shape:
+- Local DB has about 568 starred profiles, 315 ridden starred segments, 94 top-10 seen, 48 podium seen, and 6996 effort digests.
+- Raw starred segment payloads include `athlete_pr_effort` for many segments; use that as a zero-extra-call seed signal where available.
+- There is no webhook implementation yet.
+
+Implement a staged loading strategy:
+
+1. Rate-limit safety
+- Extend the rate limiter to track both Strava overall headers and read/non-upload headers if Strava returns `X-ReadRateLimit-*`.
+- Treat current Strava calls as read calls. Preserve existing proactive “raise before request” behavior.
+- Add conservative background budgets: reserve interactive capacity, avoid fixed large backfill chunks when multiple athletes have pending work, and process athletes round-robin.
+- Keep all Strava calls behind `StravaClient`.
+
+2. Fast first dataset
+- On first sync, fetch starred segments only, paginated.
+- Upsert segment metadata, `is_kom`, PR time/date/activity from `athlete_pr_effort`.
+- Make the candidates API able to show a useful provisional candidate when a starred segment has PR data even before full effort history exists. Avoid lying about `times_ridden`; either display a minimum known effort count separately or clearly distinguish “PR seeded” from imported effort count.
+- Then run a tightly capped recent-activity pass: fetch recent activities and detail only a small budgeted number with `include_all_efforts=true`, prioritizing recent outdoor rides/runs. This should improve top10/podium/watts density without calling one endpoint per segment.
+
+3. Background backfill
+- Replace fixed backfill chunk sizing with budget-derived sizing.
+- Prioritize pending segments by likely candidate value: current KOMs, PR-seeded segments, recent starred segments, outdoor rides before indoor, near-home segments when home coordinates exist, then stable ID tie-breaker.
+- Continue to persist per-segment backfill state so runs resume safely.
+- Keep KOM-time enrichment TTL-based. Fetch `GET /segments/{id}` only for high-value candidates first and only when stale/missing.
+- Be explicit that Strava webhooks do not notify segment KOM changes; use TTL refresh for KOM time changes.
+
+4. Webhooks for incremental updates
+- Add a Strava webhook router with:
+  - GET validation that checks `hub.verify_token` and echoes `hub.challenge`.
+  - POST handler that acknowledges within 2 seconds and persists/enqueues work asynchronously.
+- Add settings for `STRAVA_WEBHOOK_VERIFY_TOKEN` and, if useful, callback/subscription config.
+- Handle webhook events:
+  - `activity/create`: fetch that activity detail once with `include_all_efforts=true`, import efforts, recompute touched profiles.
+  - `activity/update`: refetch when activity type/privacy-relevant fields change.
+  - `activity/delete`: remove effort digests for that activity and recompute touched profiles.
+  - `athlete/update` with `authorized=false`: revoke/remove stored token state safely.
+- Add durable event/state tracking rather than relying only on in-memory tasks for webhook delivery.
+
+5. Tests and docs
+- Add backend tests for rate-budget decisions, PR-seeded candidate inclusion, backfill prioritization, activity create/update/delete webhook behavior, and profile recomputation after activity deletion.
+- Update docs only where behavior changes: architecture, Strava API notes, data models, and KOM/QOM feature contract.
+- Run `cd backend && uv run pytest -x`.
+- Before final response, run `git diff HEAD --name-only` and perform the project docs drift check.

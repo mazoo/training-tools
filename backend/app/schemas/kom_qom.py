@@ -21,6 +21,8 @@ class SegmentCandidate(BaseModel):
     last_seen_kom_rank: int | None
     # is_kom: athlete currently holds KOM per Strava starred response
     is_kom: bool
+    # data_quality distinguishes PR-seeded first-load rows from imported effort history.
+    data_quality: str
     best_time_s: int | None
     best_time_display: str | None
     latest_time_s: int | None
