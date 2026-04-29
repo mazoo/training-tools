@@ -29,6 +29,7 @@ _ENRICHMENT_COLS = [
     ("elevation_low", "REAL"),
     ("activity_type", "TEXT"),
     ("hazardous", "BOOLEAN"),
+    ("kom_time_checked_at", "DATETIME"),
 ]
 _PROFILE_COLS = [
     ("is_kom", "BOOLEAN DEFAULT 0"),

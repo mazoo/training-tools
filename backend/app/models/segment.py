@@ -69,6 +69,7 @@ class SegmentEnrichment(Base):
     activity_type: Mapped[str | None] = mapped_column(String, nullable=True)
     hazardous: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     kom_time_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kom_time_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     cached_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
 
 

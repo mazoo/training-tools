@@ -251,7 +251,7 @@ kom_time_s = xom_to_seconds(segment["xoms"]["kom"])
 gap_to_kom_s = profile.best_time_s - kom_time_s  # 0 if athlete holds KOM
 ```
 
-If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null` and the frontend omits the gap row on the card.
+If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null`, `kom_time_checked_at` is updated, and the frontend omits the gap row on the card.
 
 ### Distance from home (Haversine)
 
@@ -281,6 +281,7 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
 4. Historical data (365-day lookback) comes from the daily backfill cron or the permissioned UI backfill button. It processes starred segments directly with broad `GET /segment_efforts?per_page=200` windows, marking each segment done/skipped so rate-limited runs resume at the next pending segment.
+5. The same backfill run first enriches up to 10 ridden starred segments with `GET /segments/{id}` for `xoms.kom`, ordered by `podium_seen`, then `top10_seen`, then the remaining ridden segments.
 
 ## Edge cases
 

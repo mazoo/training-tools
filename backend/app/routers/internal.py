@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.services.sync import run_daily_backfill
+from app.services.sync import reset_kom_time_checked, run_daily_backfill
 
 router = APIRouter(prefix="/api/internal", tags=["internal"])
 
@@ -20,7 +20,7 @@ async def daily_backfill(
     _: None = Depends(_require_backfill_secret),
 ) -> dict:
     """
-    Advance each athlete's starred-segment effort backfill.
+    Advance each athlete's starred-segment effort and KOM-time backfills.
     Designed to be called once per day by a system cron job:
 
         curl -X POST http://localhost:8000/api/internal/daily-backfill \
@@ -30,3 +30,19 @@ async def daily_backfill(
     """
     outcomes = await run_daily_backfill(db)
     return {"outcomes": outcomes}
+
+
+@router.post("/reset-kom-time-checked")
+async def reset_kom_time_checked_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_backfill_secret),
+) -> dict:
+    """
+    Re-queue all segments whose KOM time was fetched but came back null.
+    The next backfill run will re-call GET /segments/{id} for each of them.
+
+        curl -X POST http://localhost:8000/api/internal/reset-kom-time-checked \
+             -H "Authorization: Bearer <BACKFILL_SECRET>"
+    """
+    rows_reset = await reset_kom_time_checked(db)
+    return {"rows_reset": rows_reset}

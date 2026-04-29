@@ -31,7 +31,7 @@ Recent/manual sync imports efforts from `GET /activities/{id}?include_all_effort
 
 **Layer 2 — Segment enrichment (optional)**
 
-Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. `kom_time_s` (from `xoms.kom`) is not currently populated — `GET /segments/{id}` is not called during refresh to keep Strava budget low. Treat `kom_time_s` and the gap-to-KOM as unavailable for now; the candidate list is fully functional without them.
+Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. `kom_time_s` (from `xoms.kom`) is populated by the backfill via `GET /segments/{id}` for up to 10 ridden starred segments per run. That pass prioritizes podium history first, then top-10 history, then the remaining ridden starred segments. `kom_time_checked_at` records attempts even when `xoms.kom` is absent, so missing optional data does not get retried every run.
 
 `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s` in the service layer. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
 
@@ -65,15 +65,21 @@ Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activi
 ### Historical backfill
 
 ```
-1. Read pending starred segments from local DB
+1. Fetch KOM-time enrichment for up to 10 ridden starred segments:
+   GET /segments/{id}
+   └─ parse xoms.kom into segment_enrichment.kom_time_s when present
+   └─ update segment_enrichment.kom_time_checked_at even when xoms.kom is absent
+   └─ order: podium_seen, then top10_seen, then other ridden starred segments
+
+2. Read pending starred segments from local DB
    └─ skip segments already marked done/skipped in segment_effort_backfill_state
 
-2. For each pending starred segment:
+3. For each pending starred segment:
    GET /segment_efforts?segment_id={id}&start_date_local={now-365d}&end_date_local={now}&per_page=200
    └─ normally returns all efforts for that segment in one call
    └─ if exactly 200 efforts are returned, split the date window and retry each half
 
-3. Store efforts in segment_effort_digest
+4. Store efforts in segment_effort_digest
    └─ recompute athlete_segment_profile for touched segments
    └─ mark the segment done/skipped so a rate-limited run resumes at the next segment
 ```
@@ -108,6 +114,7 @@ GET /api/kom-qom/candidates
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
 | Starred segment efforts | `GET /segment_efforts` | Daily historical backfill; one broad call per starred segment in the normal case | — |
+| KOM time enrichment | `GET /segments/{id}` | Daily/UI backfill; up to 10 ridden starred segments per run | 7 days |
 
 On a full cold-start for an athlete with 100 starred segments:
 
@@ -119,7 +126,7 @@ On a typical incremental refresh with 3 new activities since last sync:
 - 1 call: activity list
 - 3 calls: activity details
 
-Historical backfill then proceeds separately. In the normal case it uses one `GET /segment_efforts` call per starred segment over the 365-day lookback; dense segments that hit the `per_page=200` cap are split into smaller date windows.
+Historical backfill then proceeds separately. Each run first fetches up to 10 segment details for KOM-time enrichment. In the normal case it then uses one `GET /segment_efforts` call per starred segment over the 365-day lookback; dense segments that hit the `per_page=200` cap are split into smaller date windows.
 
 Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 
@@ -238,7 +245,7 @@ CREATE TABLE athlete_segment_profile (
 
 -- Segment metadata shared across athletes.
 -- Geometry/grade/elevation populated from GET /segments/starred on every sync (no TTL).
--- kom_time_s is not currently populated (GET /segments/{id} not called; kept null to save budget).
+-- kom_time_s is populated by backfill GET /segments/{id}; null if xoms.kom is unavailable.
 -- gap_to_kom_s is NOT stored — computed at query time as best_time_s - kom_time_s.
 CREATE TABLE segment_enrichment (
     segment_id              INTEGER PRIMARY KEY,
@@ -259,6 +266,7 @@ CREATE TABLE segment_enrichment (
     activity_type           TEXT,           -- "Ride" / "Run" / "VirtualRide"; primary indoor signal
     hazardous               BOOLEAN,
     kom_time_s              INTEGER,        -- parsed from xoms.kom; null if unavailable
+    kom_time_checked_at     DATETIME,       -- last GET /segments/{id} attempt
     cached_at               DATETIME NOT NULL
 );
 ```

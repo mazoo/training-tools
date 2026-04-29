@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
             ("segment_enrichment", "elevation_low", "REAL"),
             ("segment_enrichment", "activity_type", "TEXT"),
             ("segment_enrichment", "hazardous", "BOOLEAN"),
+            ("segment_enrichment", "kom_time_checked_at", "DATETIME"),
             # athlete_segment_profile: athlete-specific data from starred response
             ("athlete_segment_profile", "is_kom", "BOOLEAN DEFAULT 0"),
             ("athlete_segment_profile", "pr_time_s", "INTEGER"),

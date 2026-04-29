@@ -161,7 +161,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 
 ## `segment_enrichment` — `SegmentEnrichment` (`models/segment.py`)
 
-Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is not currently populated — `GET /segments/{id}` is not called during refresh to keep Strava budget low; the column stays null. `gap_to_kom_s` is **not stored** — computed at query time.
+Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is populated by the backfill from `GET /segments/{id}` for up to 10 ridden starred segments per run, ordered by podium history first, then top-10 history, then the remaining ridden segments. `gap_to_kom_s` is **not stored** — computed at query time.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -182,8 +182,9 @@ Segment metadata shared across athletes. Geometry/grade/elevation fields come fr
 | `elevation_low` | Float? | Absolute altitude at bottom of segment (m) |
 | `activity_type` | String? | `"Ride"`, `"Run"`, `"VirtualRide"` — primary indoor signal |
 | `hazardous` | Boolean? | Strava-flagged dangerous segment |
-| `kom_time_s` | Integer? | KOM time in seconds; null (not populated — `GET /segments/{id}` not called) |
-| `cached_at` | DateTime | Timestamp of last enrichment write (set during starred-segment sync) |
+| `kom_time_s` | Integer? | KOM time in seconds; null when `xoms.kom` is unavailable |
+| `kom_time_checked_at` | DateTime? | Last `GET /segments/{id}` attempt; lets null KOM times be cached |
+| `cached_at` | DateTime | Timestamp of last enrichment write |
 
 ---
 
@@ -286,6 +287,7 @@ erDiagram
         string activity_type
         boolean hazardous
         int kom_time_s
+        datetime kom_time_checked_at
         datetime cached_at
     }
 
@@ -300,4 +302,4 @@ erDiagram
     AthleteSegmentProfile }o--|| SegmentEnrichment  : "segment_id"
 ```
 
-`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and KOM time needed for gap calculation. `SegmentEnrichment` rows are shared across athletes and stale after 7 days.
+`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and KOM time needed for gap calculation. `SegmentEnrichment` rows are shared across athletes; KOM-time checks are refreshed after 7 days.

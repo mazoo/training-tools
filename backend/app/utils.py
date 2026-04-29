@@ -12,11 +12,15 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 
 
-def xom_to_seconds(s: str) -> int | None:
+def xom_to_seconds(s: object) -> int | None:
     if not s:
         return None
     try:
-        parts = s.split(":")
+        text = str(s).strip()
+        # Strava returns bare-seconds format for short segments, e.g. "28s"
+        if text.endswith("s") and ":" not in text:
+            return int(text[:-1])
+        parts = text.split(":")
         if len(parts) == 2:
             return int(parts[0]) * 60 + int(parts[1])
         return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])

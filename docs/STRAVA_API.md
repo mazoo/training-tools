@@ -145,7 +145,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used only for segment geometry and the optional KOM time. Called only for starred segments, cached **7 days**.
+Used by the KOM-time backfill for ridden starred segments, cached **7 days**. Each backfill run calls this endpoint for at most 10 segments, ordered by podium history first, then top-10 history, then the remaining ridden starred segments.
 
 ```json
 {
@@ -169,7 +169,7 @@ Used only for segment geometry and the optional KOM time. Called only for starre
 }
 ```
 
-**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s`. Note: `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s`.
+**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s` and update `kom_time_checked_at` so the segment is not retried until the cache expires. Note: `gap_to_kom_s` is **not stored** — it is computed at query time as `best_time_s - kom_time_s`.
 
 Parsing `xoms.kom` to seconds:
 ```python
