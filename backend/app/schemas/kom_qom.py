@@ -21,6 +21,8 @@ class SegmentCandidate(BaseModel):
     last_seen_kom_rank: int | None
     # is_kom: athlete currently holds KOM per Strava starred response
     is_kom: bool
+    # data_quality distinguishes PR-seeded first-load rows from imported effort history.
+    data_quality: str
     best_time_s: int | None
     best_time_display: str | None
     latest_time_s: int | None
@@ -32,6 +34,12 @@ class SegmentCandidate(BaseModel):
     times_ridden: int
     best_avg_watts: float | None
     latest_avg_watts: float | None
+    best_power_zone: int | None
+    estimated_kom_power_watts: float | None
+    estimated_kom_power_zone: int | None
+    # easy | realistic | hard; null when zones/power/gap data is unavailable.
+    kom_difficulty: str | None
+    kom_difficulty_label: str | None
     last_ridden_at: datetime | None
     starred_date: datetime | None
     kom_time_s: int | None

@@ -1,22 +1,41 @@
+import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.athlete import AthleteProfile
-from app.models.segment import AthleteSegmentProfile, SegmentEnrichment
+from app.models.athlete import AthleteProfile, AthleteZones
+from app.models.segment import AthleteSegmentProfile, SegmentEffortBackfillState, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters, CandidatesResponse, SegmentCandidate
 from app.utils import haversine_km, seconds_to_display
 
 
+@dataclass(frozen=True)
+class _PowerZone:
+    index: int
+    min_watts: float
+    max_watts: float | None
+
+
+@dataclass(frozen=True)
+class _PowerDifficulty:
+    best_power_zone: int | None
+    estimated_kom_power_watts: float | None
+    estimated_kom_power_zone: int | None
+    kom_difficulty: str | None
+    kom_difficulty_label: str | None
+
+
 def _apply_filters(stmt, filters: CandidateFilters):
+    known_time_s = func.coalesce(AthleteSegmentProfile.best_time_s, AthleteSegmentProfile.pr_time_s)
     if filters.podium_only:
         stmt = stmt.where(AthleteSegmentProfile.podium_seen == True)
     if filters.effort_time_min is not None:
-        stmt = stmt.where(AthleteSegmentProfile.best_time_s >= filters.effort_time_min)
+        stmt = stmt.where(known_time_s >= filters.effort_time_min)
     if filters.effort_time_max is not None:
-        stmt = stmt.where(AthleteSegmentProfile.best_time_s <= filters.effort_time_max)
+        stmt = stmt.where(known_time_s <= filters.effort_time_max)
     if filters.gradient_min is not None:
         stmt = stmt.where(SegmentEnrichment.avg_grade_pct >= filters.gradient_min)
     if filters.gradient_max is not None:
@@ -47,21 +66,142 @@ def _distance_from_home(
 def _gap_to_kom(
     profile: AthleteSegmentProfile, enrichment: SegmentEnrichment | None
 ) -> tuple[int | None, float | None]:
-    kom_time_s = enrichment.kom_time_s if enrichment else None
-    if not kom_time_s or not profile.best_time_s:
+    kom_time_s = _known_kom_time_s(profile, enrichment)
+    known_time_s = profile.best_time_s or profile.pr_time_s
+    if not kom_time_s or not known_time_s:
         return None, None
-    gap_s = profile.best_time_s - kom_time_s
+    gap_s = 0 if profile.is_kom and profile.pr_time_s else known_time_s - kom_time_s
     return gap_s, round(gap_s / kom_time_s * 100, 1)
+
+
+def _known_kom_time_s(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+) -> int | None:
+    if enrichment and enrichment.kom_time_s is not None:
+        return enrichment.kom_time_s
+    if profile.is_kom and profile.pr_time_s is not None:
+        return profile.pr_time_s
+    return None
+
+
+def _data_quality(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+    backfill_state: SegmentEffortBackfillState | None,
+) -> str:
+    if backfill_state and backfill_state.status == "done":
+        return "backfilled"
+    if _known_kom_time_s(profile, enrichment) is not None:
+        return "enriched"
+    if profile.times_ridden > 0:
+        return "imported"
+    return "seeded"
+
+
+def _parse_power_zones(athlete_zones: AthleteZones | None) -> list[_PowerZone]:
+    if athlete_zones is None:
+        return []
+    try:
+        payload = json.loads(athlete_zones.zones_json)
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+    power = payload.get("power") if isinstance(payload, dict) else None
+    raw_zones = power.get("zones") if isinstance(power, dict) else None
+    if not isinstance(raw_zones, list):
+        return []
+
+    zones: list[_PowerZone] = []
+    for index, raw_zone in enumerate(raw_zones, start=1):
+        if not isinstance(raw_zone, dict):
+            continue
+        min_watts = raw_zone.get("min")
+        max_watts = raw_zone.get("max")
+        if min_watts is None:
+            continue
+        zones.append(
+            _PowerZone(
+                index=index,
+                min_watts=float(min_watts),
+                max_watts=None if max_watts in (None, -1) else float(max_watts),
+            )
+        )
+    return zones
+
+
+def _zone_for_power(power_watts: float | None, zones: list[_PowerZone]) -> int | None:
+    if power_watts is None or not zones:
+        return None
+    rounded_power = round(power_watts)
+    for zone in zones:
+        if rounded_power >= zone.min_watts and (
+            zone.max_watts is None or rounded_power <= zone.max_watts
+        ):
+            return zone.index
+    if rounded_power < zones[0].min_watts:
+        return zones[0].index
+    if zones[-1].max_watts is not None and rounded_power > zones[-1].max_watts:
+        return zones[-1].index
+    return None
+
+
+def _difficulty_label(difficulty: str | None) -> str | None:
+    labels = {
+        "easy": "Easy to get",
+        "realistic": "Realistic",
+        "hard": "Hard to KOM",
+    }
+    return labels.get(difficulty or "")
+
+
+def _power_difficulty(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+    zones: list[_PowerZone],
+) -> _PowerDifficulty:
+    best_power_zone = _zone_for_power(profile.best_avg_watts, zones)
+    known_time_s = profile.best_time_s or profile.pr_time_s
+    kom_time_s = _known_kom_time_s(profile, enrichment)
+    gap_to_kom_s, gap_to_kom_pct = _gap_to_kom(profile, enrichment)
+
+    if not zones or profile.best_avg_watts is None or not known_time_s or not kom_time_s:
+        return _PowerDifficulty(best_power_zone, None, None, None, None)
+    if gap_to_kom_s is None or gap_to_kom_s <= 0 or gap_to_kom_pct is None:
+        return _PowerDifficulty(best_power_zone, None, None, None, None)
+
+    estimated_power = round(profile.best_avg_watts * known_time_s / kom_time_s, 1)
+    estimated_zone = _zone_for_power(estimated_power, zones)
+
+    difficulty = None
+    if estimated_zone is not None:
+        if estimated_zone <= 4 and gap_to_kom_pct <= 5:
+            difficulty = "easy"
+        elif estimated_zone <= 5 and gap_to_kom_pct <= 15:
+            difficulty = "realistic"
+        else:
+            difficulty = "hard"
+
+    return _PowerDifficulty(
+        best_power_zone=best_power_zone,
+        estimated_kom_power_watts=estimated_power,
+        estimated_kom_power_zone=estimated_zone,
+        kom_difficulty=difficulty,
+        kom_difficulty_label=_difficulty_label(difficulty),
+    )
 
 
 def _build_candidate(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
+    backfill_state: SegmentEffortBackfillState | None,
     home_lat: float | None,
     home_lng: float | None,
+    power_zones: list[_PowerZone],
 ) -> SegmentCandidate:
-    kom_time_s = enrichment.kom_time_s if enrichment else None
+    kom_time_s = _known_kom_time_s(profile, enrichment)
     gap_to_kom_s, gap_to_kom_pct = _gap_to_kom(profile, enrichment)
+    power_difficulty = _power_difficulty(profile, enrichment, power_zones)
     seg_name = (
         (enrichment.segment_name if enrichment and enrichment.segment_name else None)
         or profile.segment_name
@@ -76,6 +216,7 @@ def _build_candidate(
         best_seen_kom_rank=profile.best_seen_kom_rank,
         last_seen_kom_rank=profile.last_seen_kom_rank,
         is_kom=profile.is_kom,
+        data_quality=_data_quality(profile, enrichment, backfill_state),
         best_time_s=profile.best_time_s,
         best_time_display=seconds_to_display(profile.best_time_s),
         latest_time_s=profile.latest_time_s,
@@ -86,6 +227,11 @@ def _build_candidate(
         times_ridden=profile.times_ridden,
         best_avg_watts=profile.best_avg_watts,
         latest_avg_watts=profile.latest_avg_watts,
+        best_power_zone=power_difficulty.best_power_zone,
+        estimated_kom_power_watts=power_difficulty.estimated_kom_power_watts,
+        estimated_kom_power_zone=power_difficulty.estimated_kom_power_zone,
+        kom_difficulty=power_difficulty.kom_difficulty,
+        kom_difficulty_label=power_difficulty.kom_difficulty_label,
         last_ridden_at=profile.last_ridden_at,
         starred_date=profile.starred_date,
         kom_time_s=kom_time_s,
@@ -129,25 +275,39 @@ async def get_candidates(
         if athlete_profile and athlete_profile.home_lng is not None
         else settings.home_lng
     )
+    zones_result = await db.execute(
+        select(AthleteZones).where(AthleteZones.athlete_id == athlete_id)
+    )
+    power_zones = _parse_power_zones(zones_result.scalar_one_or_none())
 
     stmt = (
-        select(AthleteSegmentProfile, SegmentEnrichment)
+        select(AthleteSegmentProfile, SegmentEnrichment, SegmentEffortBackfillState)
         .outerjoin(
             SegmentEnrichment,
             AthleteSegmentProfile.segment_id == SegmentEnrichment.segment_id,
         )
+        .outerjoin(
+            SegmentEffortBackfillState,
+            and_(
+                SegmentEffortBackfillState.athlete_id == AthleteSegmentProfile.athlete_id,
+                SegmentEffortBackfillState.segment_id == AthleteSegmentProfile.segment_id,
+            ),
+        )
         .where(
             AthleteSegmentProfile.athlete_id == athlete_id,
             AthleteSegmentProfile.is_starred == True,
-            AthleteSegmentProfile.times_ridden > 0,
+            or_(
+                AthleteSegmentProfile.times_ridden > 0,
+                AthleteSegmentProfile.pr_time_s.is_not(None),
+            ),
         )
     )
     stmt = _apply_filters(stmt, filters)
 
     result = await db.execute(stmt)
     candidates = [
-        _build_candidate(profile, enrichment, home_lat, home_lng)
-        for profile, enrichment in result.all()
+        _build_candidate(profile, enrichment, backfill_state, home_lat, home_lng, power_zones)
+        for profile, enrichment, backfill_state in result.all()
     ]
     candidates.sort(key=lambda c: (
         not c.is_kom,
