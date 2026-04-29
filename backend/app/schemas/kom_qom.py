@@ -34,6 +34,12 @@ class SegmentCandidate(BaseModel):
     times_ridden: int
     best_avg_watts: float | None
     latest_avg_watts: float | None
+    best_power_zone: int | None
+    estimated_kom_power_watts: float | None
+    estimated_kom_power_zone: int | None
+    # easy | realistic | hard; null when zones/power/gap data is unavailable.
+    kom_difficulty: str | None
+    kom_difficulty_label: str | None
     last_ridden_at: datetime | None
     starred_date: datetime | None
     kom_time_s: int | None

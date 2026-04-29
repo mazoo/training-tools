@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from dataclasses import dataclass
 
@@ -6,7 +7,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.athlete import AthleteToken, AthleteSyncState
+from app.models.athlete import AthleteToken, AthleteSyncState, AthleteZones
 from app.models.segment import (
     AthleteSegmentProfile,
     SegmentEffortBackfillState,
@@ -30,6 +31,7 @@ BACKFILL_CALLS_PER_15MIN_WINDOW = 10
 # headroom for ongoing syncs and starred-segment enrichment.
 MIN_DAILY_BACKFILL_BUDGET = 150
 _KOM_TIME_TTL = timedelta(days=7)
+_ATHLETE_ZONES_TTL = timedelta(days=7)
 _BACKFILL_ROUND_ROBIN_INDEX = 0
 
 
@@ -81,6 +83,7 @@ async def run_sync(
         starred = await _fetch_starred_segments(client, task)
         starred_ids = {s["id"] for s in starred}
         await _update_starred_flags(db, athlete_id, starred)
+        await _sync_athlete_zones_if_stale(db, client, athlete_id, task)
 
         sync_state = await _get_sync_state(db, athlete_id)
         if sync_state and sync_state.bootstrap_done:
@@ -364,6 +367,50 @@ async def _fetch_starred_segments(
             break
         page += 1
     return starred
+
+
+async def _sync_athlete_zones_if_stale(
+    db: AsyncSession,
+    client: StravaClient,
+    athlete_id: int,
+    task: TaskStatus,
+) -> None:
+    stale_before = _now() - _ATHLETE_ZONES_TTL
+    fresh_result = await db.execute(
+        select(AthleteZones.athlete_id).where(
+            AthleteZones.athlete_id == athlete_id,
+            AthleteZones.fetched_at >= stale_before,
+        )
+    )
+    if fresh_result.scalar_one_or_none() is not None:
+        return
+
+    try:
+        zones = await client.get_athlete_zones()
+        task.strava_calls_made += 1
+    except StravaRateLimitError:
+        raise
+    except Exception as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code in {400, 403, 404}:
+            logger.warning("athlete=%d athlete zones unavailable: %s", athlete_id, exc)
+            return
+        raise
+
+    now = _now()
+    await db.execute(
+        sqlite_insert(AthleteZones)
+        .values(
+            athlete_id=athlete_id,
+            zones_json=json.dumps(zones),
+            fetched_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["athlete_id"],
+            set_={"zones_json": json.dumps(zones), "fetched_at": now},
+        )
+    )
+    await db.commit()
 
 
 async def _run_initial_kom_time_enrichment(

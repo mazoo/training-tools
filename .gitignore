@@ -14,6 +14,7 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+backend/rate_limit_state.json
 
 # Node
 node_modules/

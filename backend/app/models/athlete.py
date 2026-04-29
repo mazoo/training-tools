@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -38,6 +38,14 @@ class AthleteSyncState(Base):
     # Segment-effort backfill marks per-segment progress separately.
     backfill_cursor_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     backfill_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AthleteZones(Base):
+    __tablename__ = "athlete_zones"
+
+    athlete_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    zones_json: Mapped[str] = mapped_column(Text, nullable=False)
+    fetched_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
 
 
 class Role(Base):
