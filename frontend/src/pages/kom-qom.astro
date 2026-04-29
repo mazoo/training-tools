@@ -293,12 +293,21 @@ import Layout from "../layouts/Layout.astro";
             ${rankBadge(c)}
             ${difficultyBadge(c)}
             ${qualityBadge(c)}
-            <a href="${c.segment_url}" target="_blank" rel="noopener"
-               class="text-white font-medium hover:text-sky-400 transition-colors truncate">
+            <span class="text-white font-medium truncate">
               ${c.segment_name}
+            </span>
+          </div>
+          <div class="shrink-0 text-right">
+            <span class="block text-gray-500 text-sm">${dist} from home</span>
+            <a
+              href="${c.segment_url}"
+              target="_blank"
+              rel="noopener"
+              class="text-[11px] font-semibold text-gray-400 underline decoration-gray-600 underline-offset-4 hover:text-gray-200 hover:decoration-gray-300"
+            >
+              View on Strava
             </a>
           </div>
-          <span class="text-gray-500 text-sm shrink-0">${dist} from home</span>
         </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
           <span>${primaryTimeLabel} <strong class="text-gray-200">${primaryTime}</strong></span>
