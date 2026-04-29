@@ -196,7 +196,7 @@ The search box and sort dropdown are rendered side-by-side above the candidate l
 - **Distance from home**: flat sort by `distance_from_home_km` ASC regardless of rank (nulls last).
 
 Each segment card shows:
-- Rank badge: KOM crown if `is_kom` (currently holds KOM), podium if `podium_seen`, top-10 otherwise
+- Rank badge: KOM crown if `is_kom` (currently holds KOM), podium if `podium_seen`, top-10 if `top10_seen`; no badge if none apply
 - Segment name + Strava link
 - Distance from home (km)
 - Best time vs latest time; Strava PR (`pr_time_s`) if available; gap to KOM and `gap_to_kom_pct` (if available)

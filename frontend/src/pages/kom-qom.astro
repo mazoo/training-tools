@@ -168,7 +168,8 @@ import Layout from "../layouts/Layout.astro";
   function rankBadge(c: any): string {
     if (c.is_kom) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
     if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">🥉 Podium</span>`;
-    return `<span class="text-gray-500 text-xs">Top 10</span>`;
+    if (c.top10_seen) return `<span class="text-gray-500 text-xs">Top 10</span>`;
+    return "";
   }
 
   function card(c: any): string {
@@ -220,7 +221,8 @@ import Layout from "../layouts/Layout.astro";
   function rankGroup(c: any): number {
     if (c.is_kom) return 0;
     if (c.podium_seen) return 1;
-    return 2;
+    if (c.top10_seen) return 2;
+    return 3;
   }
 
   function sortCandidates(candidates: any[]): any[] {
