@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models.athlete import AthleteSyncState, AthleteToken
+from app.models.athlete import AthleteSyncState, AthleteToken, AthleteZones
 from app.models.segment import AthleteSegmentProfile, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters
 from app.services import sync
@@ -68,10 +69,27 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
         def __init__(self, access_token: str) -> None:
             self.access_token = access_token
             self.segment_calls: list[int] = []
+            self.zone_calls = 0
             FakeStravaClient.instances.append(self)
 
         async def get_starred_segments_page(self, page: int = 1, per_page: int = 200) -> list[dict]:
             return pages[page - 1] if page - 1 < len(pages) else []
+
+        async def get_athlete_zones(self) -> dict:
+            self.zone_calls += 1
+            return {
+                "power": {
+                    "zones": [
+                        {"min": 0, "max": 167},
+                        {"min": 168, "max": 228},
+                        {"min": 229, "max": 274},
+                        {"min": 275, "max": 319},
+                        {"min": 320, "max": 365},
+                        {"min": 366, "max": 456},
+                        {"min": 457, "max": -1},
+                    ]
+                }
+            }
 
         async def get_segment(self, segment_id: int) -> dict:
             self.segment_calls.append(segment_id)
@@ -95,7 +113,8 @@ async def test_onboarding_never_exceeds_150_calls(db_session, monkeypatch):
     client = fake_client.instances[0]
     assert task.status == "done"
     assert task.strava_calls_made == sync.ONBOARDING_STRAVA_CALL_BUDGET
-    assert len(client.segment_calls) == sync.ONBOARDING_STRAVA_CALL_BUDGET - 2
+    assert client.zone_calls == 1
+    assert len(client.segment_calls) == sync.ONBOARDING_STRAVA_CALL_BUDGET - 3
 
 
 @pytest.mark.asyncio
@@ -191,6 +210,92 @@ async def test_best_chance_prioritization_is_deterministic(db_session):
 
     segment_ids = await sync._get_pending_kom_time_backfill_ids(db_session, 1)
     assert segment_ids == [20, 30, 10]
+
+
+@pytest.mark.asyncio
+async def test_candidates_include_power_zone_difficulty(db_session):
+    now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    power_zones = {
+        "power": {
+            "zones": [
+                {"min": 0, "max": 167},
+                {"min": 168, "max": 228},
+                {"min": 229, "max": 274},
+                {"min": 275, "max": 319},
+                {"min": 320, "max": 365},
+                {"min": 366, "max": 456},
+                {"min": 457, "max": -1},
+            ]
+        }
+    }
+    db_session.add_all(
+        [
+            AthleteZones(
+                athlete_id=1,
+                zones_json=json.dumps(power_zones),
+                fetched_at=now,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=36347589,
+                segment_name="One Second Off",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=1,
+                best_time_s=47,
+                latest_time_s=47,
+                best_avg_watts=249,
+                latest_avg_watts=249,
+                top10_seen=True,
+                podium_seen=True,
+                updated_at=now,
+            ),
+            SegmentEnrichment(
+                segment_id=36347589,
+                segment_name="One Second Off",
+                kom_time_s=46,
+                cached_at=now,
+            ),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=99,
+                segment_name="Big Ask",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=1,
+                best_time_s=60,
+                latest_time_s=60,
+                best_avg_watts=400,
+                latest_avg_watts=400,
+                top10_seen=True,
+                podium_seen=False,
+                updated_at=now,
+            ),
+            SegmentEnrichment(
+                segment_id=99,
+                segment_name="Big Ask",
+                kom_time_s=45,
+                cached_at=now,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    by_id = {candidate.segment_id: candidate for candidate in response.candidates}
+
+    easy = by_id[36347589]
+    assert easy.gap_to_kom_s == 1
+    assert easy.gap_to_kom_pct == 2.2
+    assert easy.best_power_zone == 3
+    assert easy.estimated_kom_power_watts == 254.4
+    assert easy.estimated_kom_power_zone == 3
+    assert easy.kom_difficulty == "easy"
+    assert easy.kom_difficulty_label == "Easy to get"
+
+    hard = by_id[99]
+    assert hard.estimated_kom_power_zone == 7
+    assert hard.kom_difficulty == "hard"
 
 
 @pytest.mark.asyncio

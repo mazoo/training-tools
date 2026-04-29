@@ -35,6 +35,10 @@ Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activi
 
 `gap_to_kom_s` is **not stored** — it is computed at query time from the imported best effort time when available, otherwise from the starred PR time. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
 
+**Layer 3 — Athlete zones (optional)**
+
+Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` with a 7-day TTL. The KOM/QOM query reads cached power zones to estimate the wattage needed to close a known KOM gap, then tags candidates as `easy`, `realistic`, or `hard`. Candidate reads still make no Strava calls.
+
 ## Data flow: KOM/QOM candidates
 
 ### Bootstrap (first connect)
@@ -45,13 +49,16 @@ Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activi
       upsert is_kom/pr_time_s/starred_date into athlete_segment_profile
       infer kom_time_s = pr_time_s for current KOM/QOM holders
 
-2. Spend remaining calls from the 150-call onboarding budget on KOM-time enrichment:
+2. Cache athlete zones if missing/stale (GET /athlete/zones, 7-day TTL)
+   └─ store the raw zones payload in athlete_zones for power-zone difficulty tags
+
+3. Spend remaining calls from the 150-call onboarding budget on KOM-time enrichment:
    GET /segments/{id}
    └─ only for PR-seeded starred segments that do not already have known KOM time
    └─ order by "best chance" candidate priority (rank history if known,
       outdoor rides, realistic duration/grade, recent PR/star date, segment id)
 
-3. Set bootstrap_done = true, last_activity_sync_at = now
+4. Set bootstrap_done = true, last_activity_sync_at = now
 
    No activity fetch on bootstrap — effort history density comes from the backfill.
 ```
@@ -62,7 +69,9 @@ Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activi
 1. Sync starred segments  (GET /athlete/segments/starred)
    └─ same upsert as bootstrap
 
-2. Fetch new activities   (GET /athlete/activities?after=last_activity_sync_at)
+2. Cache athlete zones if missing/stale (GET /athlete/zones, 7-day TTL)
+
+3. Fetch new activities   (GET /athlete/activities?after=last_activity_sync_at)
    └─ for each activity: GET /activities/{id}?include_all_efforts=true
       └─ extract segment_efforts[]
          → insert into segment_effort_digest
@@ -108,13 +117,18 @@ GET /api/kom-qom/candidates
         │      (null if kom_time_s is unknown)
         │      (both are cheap calculations; neither is stored)
         │
-        ├─ 3. Apply filters
+        ├─ 3. Read athlete_zones
+        │      Compute best_power_zone, estimated_kom_power_watts,
+        │      estimated_kom_power_zone, and kom_difficulty when watts,
+        │      zones, and KOM time are all available
+        │
+        ├─ 4. Apply filters
         │      effort_time_min / effort_time_max  → COALESCE(best_time_s, pr_time_s)
         │      gradient_min / gradient_max        → avg_grade_pct
         │      surface                            → is_indoor
         │      podium_only                        → podium_seen = true
         │
-        └─ 4. Sort: KOMs first, then by distance_from_home ASC (nulls last), return JSON
+        └─ 5. Sort: KOMs first, then by distance_from_home ASC (nulls last), return JSON
 ```
 
 ## Caching / sync strategy
@@ -122,6 +136,7 @@ GET /api/kom-qom/candidates
 | Data | Source | Update trigger | TTL |
 |------|--------|----------------|-----|
 | Starred segments (geometry, PR, is_kom) | `GET /athlete/segments/starred` | Every sync | — |
+| Athlete zones | `GET /athlete/zones` | Sync when missing/stale | 7 days |
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
 | Starred segment efforts | `GET /segment_efforts` | Daily historical backfill; one broad call per starred segment in the normal case | — |
@@ -130,12 +145,14 @@ GET /api/kom-qom/candidates
 On a full cold-start for an athlete with 100 starred segments:
 
 - 1 call: starred segments
-- up to 149 calls: KOM-time enrichment for best-chance PR-seeded candidates
+- 1 call: athlete zones
+- up to 148 calls: KOM-time enrichment for best-chance PR-seeded candidates
 - 0 calls: activity detail fetches during bootstrap
 
 On a typical incremental refresh with 3 new activities since last sync:
 
 - 1 call: starred segments
+- 0-1 calls: athlete zones (only if older than 7 days)
 - 1 call: activity list
 - 3 calls: activity details
 
@@ -201,6 +218,13 @@ CREATE TABLE athlete_sync_state (
     last_star_sync_at       DATETIME,           -- updated after each starred-segment fetch
     backfill_cursor_at      DATETIME,           -- oldest timestamp covered once historical backfill completes
     backfill_complete       BOOLEAN DEFAULT 0    -- reset on starred sync to catch newly starred segments
+);
+
+-- Cached athlete zones from GET /athlete/zones.
+CREATE TABLE athlete_zones (
+    athlete_id      INTEGER PRIMARY KEY,
+    zones_json      TEXT NOT NULL,      -- full response payload; power.zones used by KOM/QOM
+    fetched_at      DATETIME NOT NULL
 );
 
 -- Per-starred-segment historical backfill progress.

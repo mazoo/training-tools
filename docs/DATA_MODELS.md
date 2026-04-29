@@ -95,6 +95,18 @@ Tracks sync progress for each athlete.
 
 ---
 
+## `athlete_zones` — `AthleteZones` (`models/athlete.py`)
+
+Caches the full `GET /athlete/zones` response for each athlete. The KOM/QOM candidates service reads `power.zones` from this payload to tag candidates by estimated difficulty without calling Strava during page load.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `athlete_id` | Integer PK | Strava athlete ID |
+| `zones_json` | Text | Full zones response payload as JSON |
+| `fetched_at` | DateTime | Last successful zones fetch; refreshed after 7 days |
+
+---
+
 ## `segment_effort_backfill_state` — `SegmentEffortBackfillState` (`models/segment.py`)
 
 Tracks historical `GET /segment_efforts` progress per starred segment so a rate-limited daily run can resume without re-fetching completed segments.
@@ -215,6 +227,11 @@ erDiagram
         datetime backfill_cursor_at
         boolean backfill_complete
     }
+    AthleteZones {
+        int athlete_id PK
+        text zones_json
+        datetime fetched_at
+    }
     Role {
         int id PK
         string name
@@ -293,6 +310,7 @@ erDiagram
 
     AthleteToken      ||--|| AthleteProfile     : "athlete_id"
     AthleteToken      ||--|| AthleteSyncState   : "athlete_id"
+    AthleteToken      ||--|| AthleteZones       : "athlete_id"
     AthleteToken      ||--o{ AthleteRole        : "athlete_id"
     Role              ||--o{ AthleteRole        : "role_id"
     Role              ||--o{ RolePermission     : "role_id"
@@ -302,4 +320,4 @@ erDiagram
     AthleteSegmentProfile }o--|| SegmentEnrichment  : "segment_id"
 ```
 
-`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and KOM time needed for gap calculation. `SegmentEnrichment` rows are shared across athletes; KOM-time checks are refreshed after 7 days.
+`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and KOM time needed for gap calculation. `AthleteZones` provides cached power zones for difficulty tags. `SegmentEnrichment` rows are shared across athletes; KOM-time checks and athlete zones are refreshed after 7 days.

@@ -20,7 +20,7 @@ Strava uses OAuth 2.0. The flow:
 |-------|-----------|
 | `read` | Read public segments and segment geometry |
 | `activity:read` | Read athlete's own activities and segment efforts within them |
-| `profile:read_all` | Read athlete profile |
+| `profile:read_all` | Read athlete profile and athlete zones |
 
 ## Rate limits
 
@@ -48,7 +48,7 @@ After each response, `rate_limiter.sync_from_headers(headers)` overwrites the lo
 
 Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
 
-Gap-first onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, then KOM-time enrichment calls for the highest-value PR-seeded segments. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150 and spends at most 10 calls per invocation across all athletes.
+Gap-first onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then KOM-time enrichment calls for the highest-value PR-seeded segments. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150 and spends at most 10 calls per invocation across all athletes.
 
 ### Staying safe
 
@@ -57,6 +57,34 @@ Gap-first onboarding uses a hard 150-call cap per new athlete: starred-segment p
 - Cache aggressively (see `docs/ARCHITECTURE.md`) to reduce total calls.
 
 ## Key endpoints used
+
+### Athlete zones
+
+```
+GET /athlete/zones
+Headers: Authorization: Bearer {access_token}
+```
+
+Used during `run_sync` when the cached athlete zones are missing or older than 7 days. Candidate reads use the cached `power.zones` array to tag KOM/QOM candidates as `easy`, `realistic`, or `hard`; they do not call Strava.
+
+Example shape:
+```json
+{
+  "power": {
+    "zones": [
+      { "min": 0, "max": 167 },
+      { "min": 168, "max": 228 },
+      { "min": 229, "max": 274 },
+      { "min": 275, "max": 319 },
+      { "min": 320, "max": 365 },
+      { "min": 366, "max": 456 },
+      { "min": 457, "max": -1 }
+    ]
+  }
+}
+```
+
+`max = -1` means open-ended. The app stores the full zones payload in `athlete_zones.zones_json` so heart-rate zones can be reused later without another schema change.
 
 ### Starred segments (paginated)
 

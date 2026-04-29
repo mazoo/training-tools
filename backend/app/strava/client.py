@@ -37,6 +37,9 @@ class StravaClient:
     async def get_athlete(self) -> dict:
         return await self._get("/athlete")
 
+    async def get_athlete_zones(self) -> dict:
+        return await self._get("/athlete/zones")
+
     async def get_starred_segments_page(
         self,
         page: int = 1,
