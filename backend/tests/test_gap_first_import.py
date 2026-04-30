@@ -76,6 +76,7 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
         def __init__(self, access_token: str) -> None:
             self.access_token = access_token
             self.segment_calls: list[int] = []
+            self.segment_effort_calls: list[tuple[int, int]] = []
             self.zone_calls = 0
             FakeStravaClient.instances.append(self)
 
@@ -102,6 +103,15 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
             self.segment_calls.append(segment_id)
             return segment_response or {"xoms": {"kom": "0:50"}}
 
+        async def get_segment_efforts(
+            self,
+            segment_id: int,
+            per_page: int = 200,
+            page: int = 1,
+        ) -> list[dict]:
+            self.segment_effort_calls.append((segment_id, page))
+            return []
+
     return FakeStravaClient
 
 
@@ -121,7 +131,10 @@ async def test_onboarding_never_exceeds_150_calls(db_session, monkeypatch):
     assert task.status == "done"
     assert task.strava_calls_made == sync.ONBOARDING_STRAVA_CALL_BUDGET
     assert client.zone_calls == 1
-    assert len(client.segment_calls) == sync.ONBOARDING_STRAVA_CALL_BUDGET - 3
+    remaining_calls = sync.ONBOARDING_STRAVA_CALL_BUDGET - 3
+    expected_kom_calls = remaining_calls // 2
+    assert len(client.segment_calls) == expected_kom_calls
+    assert len(client.segment_effort_calls) == remaining_calls - expected_kom_calls
 
 
 @pytest.mark.asyncio
@@ -143,7 +156,7 @@ async def test_current_kom_gets_zero_gap_without_detail_call(db_session, monkeyp
     assert candidate.pr_time_s == 55
     assert candidate.kom_time_s == 55
     assert candidate.gap_to_kom_s == 0
-    assert candidate.data_quality == "enriched"
+    assert candidate.data_quality == "backfilled"
 
 
 @pytest.mark.asyncio
@@ -410,6 +423,67 @@ async def test_backfill_chunk_retries_stale_empty_when_complete(db_session, monk
     assert candidate.best_avg_watts == 295.8
     assert candidate.top10_seen is True
     assert candidate.podium_seen is False
+
+
+@pytest.mark.asyncio
+async def test_backfill_chunk_splits_budget_between_kom_and_efforts(db_session, monkeypatch):
+    now = datetime(2026, 4, 29, tzinfo=timezone.utc)
+    db_session.add(
+        AthleteSyncState(
+            athlete_id=1,
+            bootstrap_done=True,
+            last_star_sync_at=now,
+            backfill_complete=False,
+        )
+    )
+    for segment_id in range(1, 13):
+        db_session.add(
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=segment_id,
+                segment_name=f"Segment {segment_id}",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=0,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=100 + segment_id,
+                updated_at=now,
+            )
+        )
+    await db_session.commit()
+
+    class FakeStravaClient:
+        instances: list["FakeStravaClient"] = []
+
+        def __init__(self, access_token: str) -> None:
+            self.segment_calls: list[int] = []
+            self.segment_effort_calls: list[int] = []
+            FakeStravaClient.instances.append(self)
+
+        async def get_segment(self, segment_id: int) -> dict:
+            self.segment_calls.append(segment_id)
+            return {"xoms": {"kom": "1:30"}}
+
+        async def get_segment_efforts(
+            self,
+            segment_id: int,
+            per_page: int = 200,
+            page: int = 1,
+        ) -> list[dict]:
+            self.segment_effort_calls.append(segment_id)
+            return []
+
+    monkeypatch.setattr(sync, "StravaClient", FakeStravaClient)
+
+    task = TaskStatus(task_id="backfill")
+    await sync.run_backfill_chunk(db_session, athlete_id=1, access_token="token", task=task)
+
+    client = FakeStravaClient.instances[0]
+    assert task.status == "done"
+    assert task.strava_calls_made == sync.BACKFILL_CALLS_PER_15MIN_WINDOW
+    assert client.segment_calls == [1, 2, 3, 4, 5]
+    assert client.segment_effort_calls == [1, 2, 3, 4, 5]
 
 
 @pytest.mark.asyncio

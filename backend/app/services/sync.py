@@ -61,9 +61,9 @@ async def run_sync(
     User-triggered sync.
 
     Bootstrap (first connect): spends up to ONBOARDING_STRAVA_CALL_BUDGET
-    calls on a gap-first first dataset. It fetches starred segments for free
-    athlete PR metadata, then uses remaining calls for KOM-time enrichment.
-    Effort history density is populated separately by the slow backfill.
+    calls on a balanced first dataset. It fetches starred segments for free
+    athlete PR metadata, then splits remaining calls between KOM-time
+    enrichment and segment-effort history.
 
     Incremental (subsequent calls): syncs starred segments + activities newer
     than last_activity_sync_at, so today's rides appear without waiting for
@@ -96,17 +96,30 @@ async def run_sync(
                 await _recompute_profile(db, athlete_id, segment_id, starred_ids)
         else:
             remaining_budget = max(0, ONBOARDING_STRAVA_CALL_BUDGET - task.strava_calls_made)
+            kom_budget, effort_budget = _split_call_budget(remaining_budget)
             logger.info(
-                "athlete=%d bootstrap: enriching KOM times with %d remaining onboarding calls",
+                "athlete=%d bootstrap: %d KOM-time calls + %d segment-effort calls",
                 athlete_id,
-                remaining_budget,
+                kom_budget,
+                effort_budget,
             )
+            before_kom_calls = task.strava_calls_made
             await _run_initial_kom_time_enrichment(
                 db,
                 client,
                 athlete_id,
                 task,
-                call_budget=remaining_budget,
+                call_budget=kom_budget,
+            )
+            unused_kom_budget = max(0, kom_budget - (task.strava_calls_made - before_kom_calls))
+            remaining_budget = max(0, ONBOARDING_STRAVA_CALL_BUDGET - task.strava_calls_made)
+            await _run_initial_segment_effort_backfill(
+                db,
+                client,
+                athlete_id,
+                starred_ids,
+                task,
+                call_budget=min(effort_budget + unused_kom_budget, remaining_budget),
             )
 
         await _upsert_sync_state(db, athlete_id)
@@ -149,6 +162,7 @@ async def _backfill_one_segment(
     except StravaRateLimitError:
         raise
     except Exception as exc:
+        _count_failed_strava_call(task, exc)
         logger.warning("athlete=%d failed segment-effort backfill for segment=%d", athlete_id, segment_id)
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code in {400, 403, 404}:
@@ -171,6 +185,7 @@ async def _backfill_one_segment_kom_time(
     except StravaRateLimitError:
         raise
     except Exception as exc:
+        _count_failed_strava_call(task, exc)
         logger.warning("athlete=%d failed KOM-time backfill for segment=%d", athlete_id, segment_id)
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code in {400, 403, 404}:
@@ -203,35 +218,40 @@ async def run_backfill_chunk(
 
         starred_ids = await _get_starred_ids(db, athlete_id)
         processed = 0
+        effective_call_budget = call_budget if call_budget is not None else BACKFILL_CALLS_PER_15MIN_WINDOW
+        kom_budget, effort_budget = _split_call_budget(effective_call_budget)
 
         kom_segment_ids = await _get_pending_kom_time_backfill_ids(db, athlete_id)
-        if call_budget is not None:
-            kom_segment_ids = kom_segment_ids[:call_budget]
+        kom_segment_ids = kom_segment_ids[:kom_budget]
         task.activities_total = len(kom_segment_ids)
 
         if kom_segment_ids:
             logger.info("athlete=%d KOM-time backfill: %d segments", athlete_id, len(kom_segment_ids))
 
+        before_kom_calls = task.strava_calls_made
+        kom_phase_cap = task.strava_calls_made + kom_budget
         for segment_id in kom_segment_ids:
-            if _call_budget_exhausted(task, call_budget):
+            if _call_budget_exhausted(task, kom_phase_cap):
                 break
             await _backfill_one_segment_kom_time(db, client, athlete_id, segment_id, task)
             processed += 1
             task.activities_processed = processed
 
         segment_ids: list[int] = []
-        if not _call_budget_exhausted(task, call_budget):
-            remaining_call_budget = _remaining_call_budget(task, call_budget)
+        if not _call_budget_exhausted(task, effective_call_budget):
+            unused_kom_budget = max(0, kom_budget - (task.strava_calls_made - before_kom_calls))
+            remaining_call_budget = _remaining_call_budget(task, effective_call_budget)
+            effort_budget = min(effort_budget + unused_kom_budget, remaining_call_budget or 0)
             segment_ids = await _get_pending_segment_effort_backfill_ids(db, athlete_id)
-            if remaining_call_budget is not None:
-                segment_ids = segment_ids[:remaining_call_budget]
+            segment_ids = segment_ids[:effort_budget]
             task.activities_total += len(segment_ids)
 
             if segment_ids:
                 logger.info("athlete=%d segment-effort backfill: %d segments", athlete_id, len(segment_ids))
 
+            effort_phase_cap = task.strava_calls_made + effort_budget
             for segment_id in segment_ids:
-                if _call_budget_exhausted(task, call_budget):
+                if _call_budget_exhausted(task, effort_phase_cap):
                     break
                 await _backfill_one_segment(
                     db,
@@ -240,7 +260,7 @@ async def run_backfill_chunk(
                     segment_id,
                     starred_ids,
                     task,
-                    call_budget=call_budget,
+                    call_budget=effort_phase_cap,
                 )
                 processed += 1
                 task.activities_processed = processed
@@ -341,6 +361,17 @@ def _call_budget_exhausted(task: TaskStatus, call_budget: int | None) -> bool:
     return remaining is not None and remaining <= 0
 
 
+def _split_call_budget(call_budget: int) -> tuple[int, int]:
+    call_budget = max(0, call_budget)
+    kom_budget = call_budget // 2
+    return kom_budget, call_budget - kom_budget
+
+
+def _count_failed_strava_call(task: TaskStatus, exc: Exception) -> None:
+    if getattr(getattr(exc, "response", None), "status_code", None) is not None:
+        task.strava_calls_made += 1
+
+
 def _compute_after_ts(sync_state: AthleteSyncState, full: bool) -> int:
     fallback = int((_now() - timedelta(days=_FULL_REFRESH_DAYS)).timestamp())
     if full or not sync_state.last_activity_sync_at:
@@ -391,6 +422,7 @@ async def _sync_athlete_zones_if_stale(
     except StravaRateLimitError:
         raise
     except Exception as exc:
+        _count_failed_strava_call(task, exc)
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code in {400, 403, 404}:
             logger.warning("athlete=%d athlete zones unavailable: %s", athlete_id, exc)
@@ -423,15 +455,49 @@ async def _run_initial_kom_time_enrichment(
     if call_budget <= 0:
         return
 
+    phase_cap = min(ONBOARDING_STRAVA_CALL_BUDGET, task.strava_calls_made + call_budget)
     segment_ids = (await _get_pending_kom_time_backfill_ids(db, athlete_id))[:call_budget]
     if not segment_ids:
         return
 
-    task.activities_total = len(segment_ids)
+    task.activities_total += len(segment_ids)
     for segment_id in segment_ids:
-        if _call_budget_exhausted(task, ONBOARDING_STRAVA_CALL_BUDGET):
+        if _call_budget_exhausted(task, phase_cap):
             break
         await _backfill_one_segment_kom_time(db, client, athlete_id, segment_id, task)
+        task.activities_processed += 1
+
+
+async def _run_initial_segment_effort_backfill(
+    db: AsyncSession,
+    client: StravaClient,
+    athlete_id: int,
+    starred_ids: set[int],
+    task: TaskStatus,
+    call_budget: int,
+) -> None:
+    if call_budget <= 0:
+        return
+
+    phase_cap = min(ONBOARDING_STRAVA_CALL_BUDGET, task.strava_calls_made + call_budget)
+    segment_ids = (await _get_pending_segment_effort_backfill_ids(db, athlete_id))[:call_budget]
+    if not segment_ids:
+        return
+
+    task.activities_total += len(segment_ids)
+    logger.info("athlete=%d bootstrap segment-effort backfill: %d segments", athlete_id, len(segment_ids))
+    for segment_id in segment_ids:
+        if _call_budget_exhausted(task, phase_cap):
+            break
+        await _backfill_one_segment(
+            db,
+            client,
+            athlete_id,
+            segment_id,
+            starred_ids,
+            task,
+            call_budget=phase_cap,
+        )
         task.activities_processed += 1
 
 

@@ -49,7 +49,7 @@ After each response, `rate_limiter.sync_from_headers(headers)` overwrites the lo
 
 Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
 
-Gap-first onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then KOM-time enrichment calls for the highest-value PR-seeded segments. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron backfill also stops once daily remaining calls drop below 150 and spends at most 10 calls per invocation across all athletes.
+Balanced onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then the remaining budget is split between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
 
 ### Staying safe
 
@@ -169,7 +169,7 @@ GET /segment_efforts
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used by daily historical backfill after starred segments are known. This endpoint returns `DetailedSegmentEffort` objects for the authenticated athlete on one segment, including `activity.id`, timing, watts, embedded `segment` metadata, `kom_rank`, and `pr_rank`.
+Used by balanced onboarding and later historical backfill after starred segments are known. This endpoint returns `DetailedSegmentEffort` objects for the authenticated athlete on one segment, including `activity.id`, timing, watts, embedded `segment` metadata, `kom_rank`, and `pr_rank`.
 
 Backfill asks without a date window and paginates with `per_page=200`. In the normal case this returns all efforts for that starred segment in one call. If Strava returns exactly 200 efforts, the service requests the next page while the run still has budget. If budget is exhausted mid-segment, the segment remains pending for a later run.
 
@@ -184,7 +184,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used by gap-first onboarding and later KOM-time backfill, cached **7 days**. Onboarding spends remaining calls from its 150-call budget here after starred segments are synced. Background cron backfill spends at most 10 calls per invocation across all athletes, prioritizing high-value candidates first.
+Used by balanced onboarding and later KOM-time backfill, cached **7 days**. Onboarding spends about half of its post-starred/zones budget here and sends the other half to segment-effort history. Background cron/UI backfill chunks spend at most 10 calls per invocation, split between KOM-time and segment-effort work.
 
 ```json
 {

@@ -309,11 +309,11 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first connect (`bootstrap_done = false`), `run_sync` uses a 150-call gap-first onboarding budget: fetch starred segments, cache athlete zones if stale, seed PR/current-KOM data from `athlete_pr_effort`, infer gap `0` for current KOM/QOM holders, then spend remaining calls on `GET /segments/{id}` for best-chance PR-seeded candidates.
+1. On first connect (`bootstrap_done = false`), `run_sync` uses a 150-call balanced onboarding budget: fetch starred segments, cache athlete zones if stale, seed PR/current-KOM data from `athlete_pr_effort`, infer gap `0` for current KOM/QOM holders, then split remaining calls between `GET /segments/{id}` KOM-time enrichment and `GET /segment_efforts` history import. If the KOM-time side has fewer pending segments, the unused share rolls into segment-effort backfill.
 2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
-4. Historical data comes from the daily backfill cron or the permissioned UI backfill button. Cron backfill spends at most 10 Strava calls per invocation across all athletes and rotates users round-robin.
-5. Backfill first fills missing/stale KOM-time enrichment for high-value candidates, then processes segment-effort history for gap-enriched candidates before the remaining starred segments.
+4. Historical data continues through the daily backfill cron or the permissioned UI backfill button. Each chunk spends at most 10 Strava calls and splits them between KOM-time enrichment and segment-effort history; cron rotates users round-robin.
+5. Segment-effort backfill prioritizes gap-enriched candidates before the remaining starred segments.
 6. If a previous backfill marked a PR-seeded segment done with no imported effort rows before the latest starred sync, the segment is re-queued so older empty results can be repaired.
 
 ## Edge cases

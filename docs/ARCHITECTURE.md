@@ -33,7 +33,7 @@ Recent/manual sync imports efforts from `GET /activities/{id}?include_all_effort
 
 **Layer 2 — Segment enrichment (optional)**
 
-Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. Starred segments also provide athlete-specific PR metadata via `athlete_pr_effort`, which seeds first-load candidates before full effort history is imported. `kom_time_s` (from `xoms.kom`) is populated by gap-first onboarding and by backfill via `GET /segments/{id}`. If `athlete_pr_effort.is_kom = true`, `kom_time_s` is inferred from `pr_time_s` without a detail call. `kom_time_checked_at` records attempts even when `xoms.kom` is absent, so missing optional data does not get retried every run.
+Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. Starred segments also provide athlete-specific PR metadata via `athlete_pr_effort`, which seeds first-load candidates before full effort history is imported. `kom_time_s` (from `xoms.kom`) is populated by balanced onboarding and by backfill via `GET /segments/{id}`. If `athlete_pr_effort.is_kom = true`, `kom_time_s` is inferred from `pr_time_s` without a detail call. `kom_time_checked_at` records attempts even when `xoms.kom` is absent, so missing optional data does not get retried every run.
 
 `gap_to_kom_s` is **not stored** — it is computed at query time from the imported best effort time when available, otherwise from the starred PR time. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
 
@@ -54,15 +54,20 @@ Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` w
 2. Cache athlete zones if missing/stale (GET /athlete/zones, 7-day TTL)
    └─ store the raw zones payload in athlete_zones for power-zone difficulty tags
 
-3. Spend remaining calls from the 150-call onboarding budget on KOM-time enrichment:
+3. Split remaining calls from the 150-call onboarding budget between:
    GET /segments/{id}
-   └─ only for PR-seeded starred segments that do not already have known KOM time
+   └─ KOM-time enrichment for PR-seeded starred segments without known KOM time
    └─ order by "best chance" candidate priority (rank history if known,
       outdoor rides, realistic duration/grade, recent PR/star date, segment id)
 
+   GET /segment_efforts
+   └─ effort-history import for prioritized starred segments
+   └─ unused KOM-time share rolls into segment-effort backfill
+
 4. Set bootstrap_done = true, last_activity_sync_at = now
 
-   No activity fetch on bootstrap — effort history density comes from the backfill.
+   No activity detail fetch on bootstrap — first-run effort history comes from
+   segment-effort backfill, then later daily/UI backfill chunks.
 ```
 
 ### Incremental refresh ("Refresh data" button)
@@ -84,13 +89,13 @@ Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` w
 ### Historical backfill
 
 ```
-1. Fetch KOM-time enrichment while the run still has call budget:
+1. Use about half the chunk budget for KOM-time enrichment:
    GET /segments/{id}
    └─ parse xoms.kom into segment_enrichment.kom_time_s when present
    └─ update segment_enrichment.kom_time_checked_at even when xoms.kom is absent
    └─ order: high-value candidates first, using the same best-chance priority as onboarding
 
-2. Read pending starred segments from local DB
+2. Use the remaining chunk budget for pending starred segments from local DB
    └─ skip segments already marked done/skipped in segment_effort_backfill_state,
       except stale done rows with no imported efforts and a starred PR seed
    └─ prioritize already gap-enriched candidates, then remaining starred segments
@@ -142,14 +147,15 @@ GET /api/kom-qom/candidates
 | Athlete zones | `GET /athlete/zones` | Sync when missing/stale | 7 days |
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
-| Starred segment efforts | `GET /segment_efforts` | Daily historical backfill; one broad call per starred segment in the normal case | — |
-| KOM time enrichment | `GET /segments/{id}` | Gap-first onboarding; then daily/UI backfill within call budget | 7 days |
+| Starred segment efforts | `GET /segment_efforts` | Balanced onboarding; then daily/UI backfill; one broad call per starred segment in the normal case | — |
+| KOM time enrichment | `GET /segments/{id}` | Balanced onboarding; then daily/UI backfill within call budget | 7 days |
 
 On a full cold-start for an athlete with 100 starred segments:
 
 - 1 call: starred segments
 - 1 call: athlete zones
-- up to 148 calls: KOM-time enrichment for best-chance PR-seeded candidates
+- up to ~74 calls: KOM-time enrichment for best-chance PR-seeded candidates
+- up to ~74 calls: segment-effort history for prioritized starred segments
 - 0 calls: activity detail fetches during bootstrap
 
 On a typical incremental refresh with 3 new activities since last sync:
@@ -159,7 +165,7 @@ On a typical incremental refresh with 3 new activities since last sync:
 - 1 call: activity list
 - 3 calls: activity details
 
-Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. It first fills missing/stale KOM-time enrichment for high-value candidates, then uses one `GET /segment_efforts` call per starred segment in the normal case. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
+Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. Each chunk splits its budget roughly half to missing/stale KOM-time enrichment and half to `GET /segment_efforts`; if the KOM-time side has fewer pending segments, the unused share rolls into segment-effort history. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
 
 Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 
@@ -318,7 +324,7 @@ The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It m
 - 15-min window: raises when `remaining <= 20` (out of 200)
 - Daily window: raises when `remaining <= 100` (out of 2000)
 
-Gap-first onboarding has a hard 150-call cap per new athlete. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron backfill also keeps that daily buffer and spends at most 10 calls per invocation across all athletes.
+Balanced onboarding has a hard 150-call cap per new athlete after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, split between KOM-time enrichment and segment-effort history.
 
 After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth) and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 
