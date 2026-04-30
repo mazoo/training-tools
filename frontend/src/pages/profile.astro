@@ -184,6 +184,8 @@ import Layout from "../layouts/Layout.astro";
   const debugParams = new URLSearchParams(window.location.search);
   const showStravaTokenDebug = debugParams.has("debug");
   let canRunBackfill = false;
+  let housekeepingHideTimeoutId: number | undefined;
+  let rateLimitCountdownId: number | undefined;
 
   async function init() {
     if (!token) {
@@ -300,6 +302,10 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function setHousekeepingStatus(text: string, tone: "neutral" | "ok" | "error" = "neutral") {
+    if (housekeepingHideTimeoutId !== undefined) {
+      window.clearTimeout(housekeepingHideTimeoutId);
+      housekeepingHideTimeoutId = undefined;
+    }
     const el = document.getElementById("housekeeping-status") as HTMLElement;
     el.textContent = text;
     el.className = [
@@ -309,11 +315,86 @@ import Layout from "../layouts/Layout.astro";
     el.classList.remove("hidden");
   }
 
+  function hideHousekeepingStatusAfter(ms: number) {
+    if (housekeepingHideTimeoutId !== undefined) {
+      window.clearTimeout(housekeepingHideTimeoutId);
+    }
+    housekeepingHideTimeoutId = window.setTimeout(() => {
+      document.getElementById("housekeeping-status")?.classList.add("hidden");
+      housekeepingHideTimeoutId = undefined;
+    }, ms);
+  }
+
+  function setHousekeepingButtonsDisabled(disabled: boolean) {
+    const refreshBtn = document.getElementById("btn-refresh") as HTMLButtonElement | null;
+    const backfillBtn = document.getElementById("btn-backfill") as HTMLButtonElement | null;
+    if (refreshBtn) refreshBtn.disabled = disabled;
+    if (backfillBtn) backfillBtn.disabled = disabled;
+  }
+
+  function stopRateLimitCountdown() {
+    if (rateLimitCountdownId !== undefined) {
+      window.clearInterval(rateLimitCountdownId);
+      rateLimitCountdownId = undefined;
+    }
+  }
+
+  function formatRetryCountdown(ms: number) {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  }
+
+  function startRateLimitCountdown(retryAfter?: string | null) {
+    stopRateLimitCountdown();
+    const parsedRetryAt = retryAfter ? Date.parse(retryAfter) : NaN;
+    const retryAt = Number.isFinite(parsedRetryAt)
+      ? parsedRetryAt
+      : Date.now() + 15 * 60 * 1000;
+
+    setHousekeepingButtonsDisabled(true);
+
+    const render = () => {
+      const remainingMs = retryAt - Date.now();
+      if (remainingMs <= 0) {
+        stopRateLimitCountdown();
+        setHousekeepingButtonsDisabled(false);
+        setHousekeepingStatus("Ready to retry.", "ok");
+        loadBackfillAvailability();
+        return false;
+      }
+      setHousekeepingStatus(`Rate limited — retry in ${formatRetryCountdown(remainingMs)}.`, "error");
+      return true;
+    };
+
+    if (render()) {
+      rateLimitCountdownId = window.setInterval(render, 1000);
+    }
+  }
+
+  async function retryAfterFromResponse(res: Response): Promise<string | null> {
+    if (res.status !== 429) return null;
+    try {
+      const data = await res.json();
+      const retrySeconds = data?.detail?.retry_after_seconds ?? data?.retry_after_seconds;
+      return typeof retrySeconds === "number"
+        ? new Date(Date.now() + retrySeconds * 1000).toISOString()
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function pollTask(
     taskId: string,
     path: string,
     label: (s: any) => string,
-    onDone: () => void
+    onDone: (s: any) => void
   ) {
     const poll = setInterval(async () => {
       try {
@@ -324,28 +405,24 @@ import Layout from "../layouts/Layout.astro";
           clearInterval(poll);
           if (s.status === "done") {
             setHousekeepingStatus("Done.", "ok");
-            setTimeout(() => {
-              document.getElementById("housekeeping-status")?.classList.add("hidden");
-            }, 3000);
+            hideHousekeepingStatusAfter(3000);
           } else if (s.status === "rate_limited") {
-            const retryMin = s.retry_after
-              ? Math.ceil((new Date(s.retry_after).getTime() - Date.now()) / 60000)
-              : 15;
-            setHousekeepingStatus(`Rate limited — retry in ~${retryMin} min.`, "error");
+            startRateLimitCountdown(s.retry_after);
           } else {
             setHousekeepingStatus(s.error ?? "Something went wrong.", "error");
           }
-          onDone();
+          onDone(s);
         }
       } catch {
         clearInterval(poll);
         setHousekeepingStatus("Lost connection to server.", "error");
-        onDone();
+        onDone({ status: "error" });
       }
     }, 3000);
   }
 
   document.getElementById("btn-refresh")?.addEventListener("click", async () => {
+    stopRateLimitCountdown();
     const btn = document.getElementById("btn-refresh") as HTMLButtonElement;
     btn.disabled = true;
     btn.textContent = "Syncing…";
@@ -359,10 +436,12 @@ import Layout from "../layouts/Layout.astro";
         task_id,
         "/api/kom-qom/refresh",
         (s) => `Synced ${s.activities_processed} / ${s.activities_total ?? "?"} activities`,
-        () => {
-          btn.disabled = false;
+        (s) => {
           btn.textContent = "Refresh data";
-          loadBackfillAvailability();
+          if (s.status !== "rate_limited") {
+            btn.disabled = false;
+            loadBackfillAvailability();
+          }
         }
       );
     } catch {
@@ -373,6 +452,7 @@ import Layout from "../layouts/Layout.astro";
   });
 
   document.getElementById("btn-backfill")?.addEventListener("click", async () => {
+    stopRateLimitCountdown();
     const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
     btn.disabled = true;
     btn.textContent = "Backfilling…";
@@ -380,16 +460,26 @@ import Layout from "../layouts/Layout.astro";
 
     try {
       const res = await apiFetch("/api/kom-qom/backfill", { method: "POST" });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const retryAfter = await retryAfterFromResponse(res);
+        if (retryAfter) {
+          btn.textContent = "Run daily backfill";
+          startRateLimitCountdown(retryAfter);
+          return;
+        }
+        throw new Error();
+      }
       const { task_id } = await res.json();
       pollTask(
         task_id,
         "/api/kom-qom/backfill",
         (s) => `Backfilled ${s.activities_processed} / ${s.activities_total ?? "?"} segments`,
-        () => {
-          btn.disabled = false;
+        (s) => {
           btn.textContent = "Run daily backfill";
-          loadBackfillAvailability();
+          if (s.status !== "rate_limited") {
+            btn.disabled = false;
+            loadBackfillAvailability();
+          }
         }
       );
     } catch {

@@ -70,6 +70,10 @@ Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` w
    segment-effort backfill, then later daily/UI backfill chunks.
 ```
 
+If bootstrap is interrupted after starred segments were stored locally, the next
+retry reuses those cached starred rows instead of spending another
+`GET /segments/starred` call before continuing the remaining bootstrap work.
+
 ### Incremental refresh ("Refresh data" button)
 
 ```
@@ -326,6 +330,6 @@ The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It m
 
 Balanced onboarding has a hard 150-call cap per new athlete after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, split between KOM-time enrichment and segment-effort history.
 
-After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth) and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
+After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth), aligns reset timers to Strava's fixed quarter-hour and UTC-midnight windows, and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 
-Receiving an actual `429` from Strava would indicate a bug (headroom logic failed). `BudgetExhausted` is caught in sync services and surfaces as `task.status = "rate_limited"` with a `retry_after` timestamp the frontend can display.
+`BudgetExhausted` is caught in sync services and surfaces as `task.status = "rate_limited"` with a `retry_after` timestamp the frontend can display. If Strava still returns an actual `429`, the client syncs counters from the response headers and uses the same rate-limited task status.

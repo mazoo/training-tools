@@ -45,11 +45,11 @@ Every outgoing Strava request calls `await rate_limiter.acquire()` first. If rem
 | 15 min | 200 | 20 |
 | Daily  | 2000 | 100 |
 
-After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). State is persisted to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
+After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). Reset timers are aligned to Strava's fixed quarter-hour and UTC-midnight windows, not to process start time. State is persisted to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 
-Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
+`BudgetExhausted` is the normal exhaustion signal. If Strava still returns an actual `429`, the client syncs from the response headers and reports `rate_limited` with a retry time at the next Strava window boundary.
 
-Balanced onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then the remaining budget is split between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
+Balanced onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then the remaining budget is split between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. If onboarding is interrupted after starred segments were stored locally, the next bootstrap retry reuses those cached starred rows instead of spending another `GET /segments/starred` call. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
 
 ### Staying safe
 

@@ -116,6 +116,75 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_retry_reuses_cached_starred_segments(db_session, monkeypatch):
+    now = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            AthleteZones(athlete_id=1, zones_json=json.dumps({}), fetched_at=now),
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=10,
+                segment_name="Cached Star",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=0,
+                top10_seen=False,
+                podium_seen=False,
+                pr_time_s=55,
+                updated_at=now,
+            ),
+            SegmentEnrichment(
+                segment_id=10,
+                segment_name="Cached Star",
+                avg_grade_pct=5.0,
+                activity_type="Ride",
+                cached_at=now,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    class FakeStravaClient:
+        instances: list["FakeStravaClient"] = []
+
+        def __init__(self, access_token: str) -> None:
+            self.starred_calls = 0
+            self.segment_calls: list[int] = []
+            self.segment_effort_calls: list[tuple[int, int]] = []
+            FakeStravaClient.instances.append(self)
+
+        async def get_starred_segments_page(self, page: int = 1, per_page: int = 200) -> list[dict]:
+            self.starred_calls += 1
+            raise AssertionError("bootstrap retry should reuse cached starred segments")
+
+        async def get_athlete_zones(self) -> dict:
+            raise AssertionError("fresh cached zones should skip Strava zones")
+
+        async def get_segment(self, segment_id: int) -> dict:
+            self.segment_calls.append(segment_id)
+            return {"xoms": {"kom": "0:50"}}
+
+        async def get_segment_efforts(
+            self,
+            segment_id: int,
+            per_page: int = 200,
+            page: int = 1,
+        ) -> list[dict]:
+            self.segment_effort_calls.append((segment_id, page))
+            return []
+
+    monkeypatch.setattr(sync, "StravaClient", FakeStravaClient)
+
+    task = TaskStatus(task_id="bootstrap-retry")
+    await sync.run_sync(db_session, athlete_id=1, access_token="token", task=task)
+
+    client = FakeStravaClient.instances[0]
+    assert task.status == "done"
+    assert client.starred_calls == 0
+    assert client.segment_effort_calls == [(10, 1)]
+
+
+@pytest.mark.asyncio
 async def test_onboarding_never_exceeds_150_calls(db_session, monkeypatch):
     pages = [
         [_starred_segment(i, pr_time_s=100 + i) for i in range(1, 201)],

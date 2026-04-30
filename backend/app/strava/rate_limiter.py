@@ -27,8 +27,8 @@ class StravaRateLimiter:
         self._lock = asyncio.Lock()
         self._remaining_15min: int = 200
         self._remaining_daily: int = 2000
-        self._reset_15min_at: float = time.monotonic() + _WINDOW_15MIN_S
-        self._reset_daily_at: float = time.monotonic() + _WINDOW_DAILY_S
+        self._reset_15min_at: float = self._next_monotonic_boundary(_WINDOW_15MIN_S)
+        self._reset_daily_at: float = self._next_monotonic_boundary(_WINDOW_DAILY_S)
         self._load_state()
 
     # ── public interface ──────────────────────────────────────────────────────
@@ -57,6 +57,8 @@ class StravaRateLimiter:
             l15, ldaily = map(int, limit_raw.split(","))
             self._remaining_15min = max(0, l15 - u15)
             self._remaining_daily = max(0, ldaily - udaily)
+            self._reset_15min_at = self._next_monotonic_boundary(_WINDOW_15MIN_S)
+            self._reset_daily_at = self._next_monotonic_boundary(_WINDOW_DAILY_S)
             logger.debug(
                 "strava budget: 15min=%d/%d  daily=%d/%d",
                 self._remaining_15min, l15, self._remaining_daily, ldaily,
@@ -88,16 +90,29 @@ class StravaRateLimiter:
         changed = False
         if now >= self._reset_15min_at:
             self._remaining_15min = 200
-            self._reset_15min_at = now + _WINDOW_15MIN_S
+            self._reset_15min_at = self._next_monotonic_boundary(_WINDOW_15MIN_S)
             changed = True
             logger.debug("15-min rate limit window reset")
         if now >= self._reset_daily_at:
             self._remaining_daily = 2000
-            self._reset_daily_at = now + _WINDOW_DAILY_S
+            self._reset_daily_at = self._next_monotonic_boundary(_WINDOW_DAILY_S)
             changed = True
             logger.debug("daily rate limit window reset")
         if changed:
             self._save_state()
+
+    @staticmethod
+    def _next_monotonic_boundary(window_s: int) -> float:
+        seconds_until_reset = StravaRateLimiter._seconds_until_next_boundary(window_s)
+        return time.monotonic() + seconds_until_reset
+
+    @staticmethod
+    def _seconds_until_next_boundary(window_s: int, wall_now: float | None = None) -> float:
+        wall_now = time.time() if wall_now is None else wall_now
+        seconds_until_reset = window_s - (wall_now % window_s)
+        if seconds_until_reset <= 0:
+            seconds_until_reset = window_s
+        return seconds_until_reset
 
     # ── persistence ───────────────────────────────────────────────────────────
 
@@ -124,11 +139,13 @@ class StravaRateLimiter:
             reset_15min_wall = data.get("reset_15min_wall", wall_now + _WINDOW_15MIN_S)
             reset_daily_wall = data.get("reset_daily_wall", wall_now + _WINDOW_DAILY_S)
 
-            secs_until_15min = max(0.0, reset_15min_wall - wall_now)
+            secs_until_15min = self._seconds_until_next_boundary(_WINDOW_15MIN_S, wall_now)
             secs_until_daily = max(0.0, reset_daily_wall - wall_now)
 
-            if secs_until_15min > 0:
-                # Window hasn't reset yet — restore the saved remaining count.
+            current_15min_window_started_at = wall_now - (wall_now % _WINDOW_15MIN_S)
+            if reset_15min_wall > current_15min_window_started_at:
+                # Restore saved budget from the current Strava window, but align
+                # the retry time to Strava's fixed quarter-hour boundary.
                 self._remaining_15min = data.get("remaining_15min", 200)
                 self._reset_15min_at = mono_now + secs_until_15min
             # else: window already elapsed, keep default 200 (full budget)

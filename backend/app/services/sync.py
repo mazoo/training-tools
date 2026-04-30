@@ -79,14 +79,25 @@ async def run_sync(
         client = StravaClient(access_token)
 
         task.status = "running"
-        logger.info("athlete=%d syncing starred segments", athlete_id)
-        starred = await _fetch_starred_segments(client, task)
-        starred_ids = {s["id"] for s in starred}
-        await _update_starred_flags(db, athlete_id, starred)
+        sync_state = await _get_sync_state(db, athlete_id)
+        bootstrap_done = bool(sync_state and sync_state.bootstrap_done)
+        cached_starred_ids = set() if bootstrap_done else await _get_starred_ids(db, athlete_id)
+
+        if cached_starred_ids and not bootstrap_done:
+            logger.info(
+                "athlete=%d reusing %d cached starred segments during bootstrap retry",
+                athlete_id,
+                len(cached_starred_ids),
+            )
+            starred_ids = cached_starred_ids
+        else:
+            logger.info("athlete=%d syncing starred segments", athlete_id)
+            starred = await _fetch_starred_segments(client, task)
+            starred_ids = {s["id"] for s in starred}
+            await _update_starred_flags(db, athlete_id, starred)
         await _sync_athlete_zones_if_stale(db, client, athlete_id, task)
 
-        sync_state = await _get_sync_state(db, athlete_id)
-        if sync_state and sync_state.bootstrap_done:
+        if bootstrap_done:
             after_ts = _compute_after_ts(sync_state, full)
             activities = await _fetch_activities(client, after_ts=after_ts, task=task)
             task.activities_total = len(activities)
