@@ -79,7 +79,7 @@ HOME_LAT=<fallback default, optional>
 HOME_LNG=<fallback default, optional>
 ```
 
-The workflow builds the frontend, tests the backend, uploads a release tarball, writes `/opt/training-tools/.env.production`, installs the systemd/Caddy templates, restarts the API, reloads Caddy, and checks `https://<domain>/health`.
+The workflow builds the frontend, tests the backend, uploads a release tarball, writes `/opt/training-tools/.env.production`, installs the systemd/Caddy templates, restarts the API, reloads Caddy, and checks `https://<domain>/health` with retries. The retry window gives first deployments time for Caddy to start serving on port 443 and obtain the initial TLS certificate.
 
 ## Runtime Files
 
@@ -106,8 +106,10 @@ Useful checks:
 
 ```bash
 systemctl status training-tools-api.service
+systemctl status caddy
 systemctl list-timers 'training-tools-*'
 journalctl -u training-tools-api.service -n 100 --no-pager
+journalctl -u caddy -n 100 --no-pager
 curl -fsS http://127.0.0.1:8000/health
 ```
 

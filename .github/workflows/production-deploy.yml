@@ -205,4 +205,23 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
-          curl -fsS "https://${PRODUCTION_DOMAIN}/health"
+          health_url="https://${PRODUCTION_DOMAIN}/health"
+          max_attempts=30
+          sleep_seconds=10
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            if curl -fsS --connect-timeout 5 --max-time 10 "$health_url"; then
+              echo "Smoke test passed on attempt ${attempt}"
+              exit 0
+            else
+              curl_status=$?
+            fi
+
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "::error::Smoke test failed after ${max_attempts} attempts; last curl exit code: ${curl_status}"
+              exit "$curl_status"
+            fi
+
+            echo "Smoke test attempt ${attempt}/${max_attempts} failed with curl exit code ${curl_status}; waiting for Caddy/TLS readiness..."
+            sleep "$sleep_seconds"
+          done
