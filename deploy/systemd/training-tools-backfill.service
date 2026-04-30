@@ -1,0 +1,11 @@
+[Unit]
+Description=Training Tools daily Strava backfill
+Wants=training-tools-api.service
+After=training-tools-api.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+EnvironmentFile={{DEPLOY_PATH}}/.env.production
+ExecStart=/usr/bin/curl -fsS -X POST http://127.0.0.1:8000/api/internal/daily-backfill -H "Authorization: Bearer ${BACKFILL_SECRET}"

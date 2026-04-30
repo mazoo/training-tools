@@ -1,0 +1,21 @@
+[Unit]
+Description=Training Tools FastAPI backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory={{DEPLOY_PATH}}/current/backend
+EnvironmentFile={{DEPLOY_PATH}}/.env.production
+ExecStart={{DEPLOY_PATH}}/current/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths={{DATA_PATH}}
+
+[Install]
+WantedBy=multi-user.target

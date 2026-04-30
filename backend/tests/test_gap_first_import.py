@@ -352,6 +352,67 @@ async def test_backfill_chunk_retries_stale_empty_when_complete(db_session, monk
                 status="done",
                 completed_at=stale_done_at,
                 last_attempt_at=stale_done_at,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    class FakeStravaClient:
+        def __init__(self, access_token: str) -> None:
+            self.access_token = access_token
+
+        async def get_segment_efforts(
+            self,
+            segment_id: int,
+            per_page: int = 200,
+            page: int = 1,
+        ) -> list[dict]:
+            assert segment_id == 7914618
+            if page > 1:
+                return []
+            return [
+                {
+                    "id": 3265372731392868352,
+                    "activity": {"id": 12300336835},
+                    "elapsed_time": 167,
+                    "moving_time": 167,
+                    "average_watts": 295.8,
+                    "kom_rank": 5,
+                    "pr_rank": None,
+                    "start_date": "2024-09-01T16:20:12Z",
+                    "segment": {
+                        "id": 7914618,
+                        "name": "Aarwangenstrasse Climb",
+                        "activity_type": "Ride",
+                        "distance": 1764.7,
+                        "average_grade": 1.3,
+                        "maximum_grade": 6.3,
+                        "start_latlng": [47.259465, 7.707584],
+                        "city": "Niederbipp",
+                        "country": "Switzerland",
+                        "climb_category": 0,
+                    },
+                }
+            ]
+
+    monkeypatch.setattr(sync, "StravaClient", FakeStravaClient)
+
+    task = TaskStatus(task_id="backfill")
+    await sync.run_backfill_chunk(db_session, athlete_id=1, access_token="token", task=task)
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+    assert task.status == "done"
+    assert task.strava_calls_made == 1
+    assert candidate.segment_id == 7914618
+    assert candidate.times_ridden == 1
+    assert candidate.best_time_s == 167
+    assert candidate.best_avg_watts == 295.8
+    assert candidate.top10_seen is True
+    assert candidate.podium_seen is False
+
+
+@pytest.mark.asyncio
 async def test_candidates_include_power_zone_difficulty(db_session):
     now = datetime(2026, 4, 1, tzinfo=timezone.utc)
     power_zones = {
@@ -420,59 +481,6 @@ async def test_candidates_include_power_zone_difficulty(db_session):
     )
     await db_session.commit()
 
-    class FakeStravaClient:
-        def __init__(self, access_token: str) -> None:
-            self.access_token = access_token
-
-        async def get_segment_efforts(
-            self,
-            segment_id: int,
-            per_page: int = 200,
-            page: int = 1,
-        ) -> list[dict]:
-            assert segment_id == 7914618
-            if page > 1:
-                return []
-            return [
-                {
-                    "id": 3265372731392868352,
-                    "activity": {"id": 12300336835},
-                    "elapsed_time": 167,
-                    "moving_time": 167,
-                    "average_watts": 295.8,
-                    "kom_rank": 5,
-                    "pr_rank": None,
-                    "start_date": "2024-09-01T16:20:12Z",
-                    "segment": {
-                        "id": 7914618,
-                        "name": "Aarwangenstrasse Climb",
-                        "activity_type": "Ride",
-                        "distance": 1764.7,
-                        "average_grade": 1.3,
-                        "maximum_grade": 6.3,
-                        "start_latlng": [47.259465, 7.707584],
-                        "city": "Niederbipp",
-                        "country": "Switzerland",
-                        "climb_category": 0,
-                    },
-                }
-            ]
-
-    monkeypatch.setattr(sync, "StravaClient", FakeStravaClient)
-
-    task = TaskStatus(task_id="backfill")
-    await sync.run_backfill_chunk(db_session, athlete_id=1, access_token="token", task=task)
-
-    response = await get_candidates(db_session, 1, CandidateFilters())
-    candidate = response.candidates[0]
-    assert task.status == "done"
-    assert task.strava_calls_made == 1
-    assert candidate.segment_id == 7914618
-    assert candidate.times_ridden == 1
-    assert candidate.best_time_s == 167
-    assert candidate.best_avg_watts == 295.8
-    assert candidate.top10_seen is True
-    assert candidate.podium_seen is False
     response = await get_candidates(db_session, 1, CandidateFilters())
     by_id = {candidate.segment_id: candidate for candidate in response.candidates}
 

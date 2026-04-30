@@ -1,0 +1,208 @@
+name: Production Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test, Build, Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/training-tools' }}
+      DATA_PATH: ${{ vars.DATA_PATH || '/var/lib/training-tools' }}
+      PRODUCTION_DOMAIN: ${{ vars.PRODUCTION_DOMAIN || secrets.PRODUCTION_DOMAIN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          BACKFILL_SECRET: ${{ secrets.BACKFILL_SECRET }}
+          ALLOWED_ATHLETE_IDS: ${{ secrets.ALLOWED_ATHLETE_IDS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            PRODUCTION_DOMAIN \
+            LIGHTSAIL_HOST LIGHTSAIL_USER LIGHTSAIL_SSH_KEY LIGHTSAIL_KNOWN_HOSTS \
+            STRAVA_CLIENT_ID STRAVA_CLIENT_SECRET SECRET_KEY BACKFILL_SECRET \
+            ALLOWED_ATHLETE_IDS
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is required for production deploys"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Run backend tests
+        working-directory: backend
+        run: uv run pytest -x
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          release="${GITHUB_SHA::12}"
+          echo "RELEASE=$release" >> "$GITHUB_ENV"
+          mkdir -p release
+          rsync -a \
+            --exclude='.env' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='*.db' \
+            --exclude='*.db-shm' \
+            --exclude='*.db-wal' \
+            --exclude='rate_limit_state.json' \
+            backend/ release/backend/
+          mkdir -p release/frontend
+          rsync -a frontend/dist/ release/frontend/dist/
+          rsync -a deploy/ release/deploy/
+          tar -C release -czf "training-tools-${release}.tar.gz" .
+
+      - name: Write production environment file
+        env:
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          BACKFILL_SECRET: ${{ secrets.BACKFILL_SECRET }}
+          HOME_LAT: ${{ secrets.HOME_LAT }}
+          HOME_LNG: ${{ secrets.HOME_LNG }}
+          ALLOWED_ATHLETE_IDS: ${{ secrets.ALLOWED_ATHLETE_IDS }}
+        run: |
+          set -euo pipefail
+          cat > production.env <<EOF
+          STRAVA_CLIENT_ID=${STRAVA_CLIENT_ID}
+          STRAVA_CLIENT_SECRET=${STRAVA_CLIENT_SECRET}
+          STRAVA_REDIRECT_URI=https://${PRODUCTION_DOMAIN}/auth/strava/callback
+          FRONTEND_URL=https://${PRODUCTION_DOMAIN}
+          DATABASE_URL=sqlite+aiosqlite:///${DATA_PATH}/training_tools.db
+          RATE_LIMIT_STATE_PATH=${DATA_PATH}/rate_limit_state.json
+          SECRET_KEY=${SECRET_KEY}
+          BACKFILL_SECRET=${BACKFILL_SECRET}
+          ALLOWED_ATHLETE_IDS=${ALLOWED_ATHLETE_IDS}
+          HOME_LAT=${HOME_LAT}
+          HOME_LNG=${HOME_LNG}
+          EOF
+
+      - name: Configure SSH
+        env:
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$LIGHTSAIL_SSH_KEY" > ~/.ssh/lightsail
+          chmod 600 ~/.ssh/lightsail
+          printf '%s\n' "$LIGHTSAIL_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/lightsail \
+            "training-tools-${RELEASE}.tar.gz" production.env \
+            "${LIGHTSAIL_USER}@${LIGHTSAIL_HOST}:/tmp/"
+
+      - name: Activate release
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/lightsail "${LIGHTSAIL_USER}@${LIGHTSAIL_HOST}" \
+            "DEPLOY_PATH='${DEPLOY_PATH}' DATA_PATH='${DATA_PATH}' RELEASE='${RELEASE}' DOMAIN='${PRODUCTION_DOMAIN}' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          deploy_user="$(id -un)"
+          sudo install -d -m 0755 "$DEPLOY_PATH" "$DEPLOY_PATH/releases"
+          sudo chown "$deploy_user:$deploy_user" "$DEPLOY_PATH" "$DEPLOY_PATH/releases"
+          install -d "$DEPLOY_PATH/releases/$RELEASE"
+          tar -xzf "/tmp/training-tools-${RELEASE}.tar.gz" -C "$DEPLOY_PATH/releases/$RELEASE"
+
+          sudo install -d -o www-data -g www-data -m 0750 "$DATA_PATH" "$DATA_PATH/backups"
+          sudo install -m 0640 -o www-data -g www-data /tmp/production.env "$DEPLOY_PATH/.env.production"
+
+          cd "$DEPLOY_PATH/releases/$RELEASE/backend"
+          uv sync --frozen --no-dev
+
+          ln -sfn "$DEPLOY_PATH/releases/$RELEASE" "$DEPLOY_PATH/current"
+
+          for unit in \
+            training-tools-api.service \
+            training-tools-backfill.service \
+            training-tools-backfill.timer \
+            training-tools-sqlite-backup.service \
+            training-tools-sqlite-backup.timer
+          do
+            sed \
+              -e "s|{{DEPLOY_PATH}}|$DEPLOY_PATH|g" \
+              -e "s|{{DATA_PATH}}|$DATA_PATH|g" \
+              "$DEPLOY_PATH/current/deploy/systemd/$unit" | sudo tee "/etc/systemd/system/$unit" >/dev/null
+          done
+
+          sed \
+            -e "s|{{TRAINING_TOOLS_DOMAIN}}|$DOMAIN|g" \
+            -e "s|{{DEPLOY_PATH}}|$DEPLOY_PATH|g" \
+            "$DEPLOY_PATH/current/deploy/Caddyfile" | sudo tee /etc/caddy/Caddyfile >/dev/null
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable caddy training-tools-api.service training-tools-backfill.timer training-tools-sqlite-backup.timer
+          sudo systemctl enable --now training-tools-backfill.timer training-tools-sqlite-backup.timer
+          sudo systemctl restart training-tools-api.service
+          sudo systemctl reload caddy || sudo systemctl restart caddy
+          REMOTE
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          curl -fsS "https://${PRODUCTION_DOMAIN}/health"

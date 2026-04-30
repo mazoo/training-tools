@@ -1,0 +1,12 @@
+[Unit]
+Description=Training Tools SQLite backup
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+EnvironmentFile={{DEPLOY_PATH}}/.env.production
+Environment=TRAINING_TOOLS_DB_PATH={{DATA_PATH}}/training_tools.db
+Environment=TRAINING_TOOLS_BACKUP_DIR={{DATA_PATH}}/backups
+Environment=TRAINING_TOOLS_BACKUP_RETENTION_DAYS=14
+ExecStart=/bin/bash {{DEPLOY_PATH}}/current/deploy/scripts/sqlite-backup.sh

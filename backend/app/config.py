@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,8 +17,10 @@ class Settings(BaseSettings):
     strava_redirect_uri: str          # e.g. http://localhost:8000/auth/strava/callback
     frontend_url: str                 # e.g. http://localhost:4321
     database_url: str = "sqlite+aiosqlite:///./training_tools.db"
+    rate_limit_state_path: Path = Path("rate_limit_state.json")
     secret_key: str                   # random secret for session signing
     backfill_secret: str              # random secret for POST /api/internal/daily-backfill
+    allowed_athlete_ids: str = ""     # comma-separated Strava athlete IDs; empty = open OAuth
     home_lat: float | None = None
     home_lng: float | None = None
 

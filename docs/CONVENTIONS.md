@@ -34,6 +34,8 @@ client = StravaClient(access_token)
 
 `get_valid_access_token` transparently refreshes the token if it expires within 60 s.
 
+For the first SQLite-backed production deployment, `ALLOWED_ATHLETE_IDS` should be set to a comma-separated list of approved Strava athlete IDs. The Strava OAuth callback rejects non-allowlisted athletes before token storage.
+
 ## Permission pattern
 
 Roles and permissions live in `models/athlete.py`, with helpers in `services/permissions.py`. Startup seeds the built-in `admin` role, the `backfill_from_ui` and `strava_api_token_visible` permissions, and grants `admin` to the only connected athlete when no role assignments exist yet.

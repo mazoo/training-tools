@@ -11,8 +11,9 @@ Strava uses OAuth 2.0. The flow:
    - `scope=read,activity:read,profile:read_all`  — **minimum required scopes for this app**
 2. Strava redirects back with `?code=…`
 3. Backend exchanges the code for tokens: `POST https://www.strava.com/oauth/token`
-4. Backend stores `access_token`, `refresh_token`, `expires_at` in `athlete_tokens`.
-5. Before every API call, check `expires_at`; if `now + 60s > expires_at`, refresh with `refresh_token`.
+4. If `ALLOWED_ATHLETE_IDS` is set, backend rejects athletes not in that comma-separated allowlist before storing tokens.
+5. Backend stores `access_token`, `refresh_token`, `expires_at` in `athlete_tokens`.
+6. Before every API call, check `expires_at`; if `now + 60s > expires_at`, refresh with `refresh_token`.
 
 ### Required OAuth scopes
 
@@ -44,7 +45,7 @@ Every outgoing Strava request calls `await rate_limiter.acquire()` first. If rem
 | 15 min | 200 | 20 |
 | Daily  | 2000 | 100 |
 
-After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). State is persisted to `rate_limit_state.json` so budget survives process restarts.
+After each response, `rate_limiter.sync_from_headers(headers)` overwrites the local counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` (ground truth). State is persisted to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 
 Receiving an actual `429` from Strava indicates the headroom logic failed and should be treated as a bug. `BudgetExhausted` is the normal exhaustion signal.
 

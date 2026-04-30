@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Training Tools SQLite backup daily
+
+[Timer]
+OnCalendar=*-*-* 01:50:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=training-tools-sqlite-backup.service
+
+[Install]
+WantedBy=timers.target

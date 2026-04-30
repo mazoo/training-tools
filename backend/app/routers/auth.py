@@ -20,6 +20,31 @@ SCOPES = "read,activity:read,profile:read_all"
 _CALLBACK_PATH = urlparse(settings.strava_redirect_uri).path
 
 
+def _allowed_athlete_ids() -> set[int]:
+    allowed_ids: set[int] = set()
+    for raw_id in settings.allowed_athlete_ids.split(","):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            allowed_ids.add(int(raw_id))
+        except ValueError:
+            raise HTTPException(
+                status_code=500,
+                detail="ALLOWED_ATHLETE_IDS must be a comma-separated list of integers",
+            )
+    return allowed_ids
+
+
+def _require_allowed_athlete(athlete_id: int) -> None:
+    allowed_ids = _allowed_athlete_ids()
+    if allowed_ids and athlete_id not in allowed_ids:
+        raise HTTPException(
+            status_code=403,
+            detail="This Strava athlete is not allowed to connect to this deployment",
+        )
+
+
 @router.get("/auth/login")
 async def login() -> RedirectResponse:
     url = (
@@ -44,6 +69,7 @@ async def callback(
 
     token_data = await StravaClient.exchange_token(code)
     athlete_id = token_data["athlete"]["id"]
+    _require_allowed_athlete(athlete_id)
 
     await db.execute(
         sqlite_insert(AthleteToken)

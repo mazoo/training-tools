@@ -4,6 +4,8 @@ import logging
 import time
 from pathlib import Path
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 HEADROOM_15MIN = 20
@@ -11,8 +13,9 @@ HEADROOM_DAILY = 100
 _WINDOW_15MIN_S = 900
 _WINDOW_DAILY_S = 86400
 
-# State file sits next to the SQLite DB (backend working directory).
-_STATE_FILE = Path("rate_limit_state.json")
+# State file defaults to the backend working directory in dev. Production should
+# point this at the same persistent data volume as SQLite.
+_STATE_FILE = Path(settings.rate_limit_state_path)
 
 
 class BudgetExhausted(Exception):

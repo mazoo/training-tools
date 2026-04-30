@@ -19,6 +19,8 @@ The backend is the only component that ever calls Strava. The frontend talks onl
 
 Authentication is Strava OAuth plus a signed session token. Authorization is local: `roles`, `permissions`, `role_permissions`, and `athlete_roles` define privileged app capabilities without depending on Strava.
 
+Production can also set `ALLOWED_ATHLETE_IDS` as a comma-separated private allowlist. The OAuth callback exchanges the Strava code to identify the athlete, then rejects non-allowlisted athletes before storing tokens or issuing a session. This keeps the first SQLite-backed production deployment private while preserving public read access to the static pages.
+
 Startup seeds an `admin` role and the `backfill_from_ui` and `strava_api_token_visible` permissions, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom. The profile-page Strava access-token debug view is protected server-side by `strava_api_token_visible`.
 
 ## Two-layer data model
@@ -318,6 +320,6 @@ The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It m
 
 Gap-first onboarding has a hard 150-call cap per new athlete. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron backfill also keeps that daily buffer and spends at most 10 calls per invocation across all athletes.
 
-After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth) and persists state to `rate_limit_state.json` so budget survives process restarts.
+After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth) and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 
 Receiving an actual `429` from Strava would indicate a bug (headroom logic failed). `BudgetExhausted` is caught in sync services and surfaces as `task.status = "rate_limited"` with a `retry_after` timestamp the frontend can display.

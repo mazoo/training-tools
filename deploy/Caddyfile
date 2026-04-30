@@ -1,0 +1,26 @@
+{{TRAINING_TOOLS_DOMAIN}} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /auth/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * {{DEPLOY_PATH}}/current/frontend/dist
+		try_files {path} {path}/ /404.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
