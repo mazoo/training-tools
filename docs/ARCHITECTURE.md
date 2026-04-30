@@ -21,7 +21,7 @@ Authentication is Strava OAuth plus a signed session token. Authorization is loc
 
 Production can also set `ALLOWED_ATHLETE_IDS` as a comma-separated private allowlist. The OAuth callback exchanges the Strava code to identify the athlete, then rejects non-allowlisted athletes before storing tokens or issuing a session. This keeps the first SQLite-backed production deployment private while preserving public read access to the static pages.
 
-Startup seeds an `admin` role and the `backfill_from_ui` and `strava_api_token_visible` permissions, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom. The profile-page Strava access-token debug view is protected server-side by `strava_api_token_visible`.
+Startup seeds an `admin` role and the `backfill_from_ui` and `strava_api_token_visible` permissions, then grants `admin` to the only connected athlete if no role assignments exist. `/api/auth/me` returns the athlete's `roles` and `permissions`. Browser-triggered historical backfill is protected server-side by `backfill_from_ui` and is only exposed in the UI while the Strava budget has safe 15-minute and daily headroom. The profile-page Strava access-token debug view is shown only on `/profile?debug` and remains protected server-side by `strava_api_token_visible`.
 
 ## Two-layer data model
 

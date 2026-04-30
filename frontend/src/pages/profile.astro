@@ -181,6 +181,8 @@ import Layout from "../layouts/Layout.astro";
 
   const BACKFILL_FROM_UI = "backfill_from_ui";
   const STRAVA_API_TOKEN_VISIBLE = "strava_api_token_visible";
+  const debugParams = new URLSearchParams(window.location.search);
+  const showStravaTokenDebug = debugParams.has("debug");
   let canRunBackfill = false;
 
   async function init() {
@@ -233,7 +235,7 @@ import Layout from "../layouts/Layout.astro";
     canRunBackfill = data.permissions?.includes(BACKFILL_FROM_UI) ?? false;
     updateHousekeepingDescription();
 
-    if (data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
+    if (showStravaTokenDebug && data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
       loadStravaAccessToken();
     }
 
