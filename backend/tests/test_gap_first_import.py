@@ -77,6 +77,7 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
             self.access_token = access_token
             self.segment_calls: list[int] = []
             self.segment_effort_calls: list[tuple[int, int]] = []
+            self.call_order: list[tuple[str, int]] = []
             self.zone_calls = 0
             FakeStravaClient.instances.append(self)
 
@@ -101,6 +102,7 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
 
         async def get_segment(self, segment_id: int) -> dict:
             self.segment_calls.append(segment_id)
+            self.call_order.append(("segment", segment_id))
             return segment_response or {"xoms": {"kom": "0:50"}}
 
         async def get_segment_efforts(
@@ -110,6 +112,7 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
             page: int = 1,
         ) -> list[dict]:
             self.segment_effort_calls.append((segment_id, page))
+            self.call_order.append(("effort", segment_id))
             return []
 
     return FakeStravaClient
@@ -185,7 +188,7 @@ async def test_bootstrap_retry_reuses_cached_starred_segments(db_session, monkey
 
 
 @pytest.mark.asyncio
-async def test_onboarding_never_exceeds_150_calls(db_session, monkeypatch):
+async def test_onboarding_uses_50_balanced_backfill_calls(db_session, monkeypatch):
     pages = [
         [_starred_segment(i, pr_time_s=100 + i) for i in range(1, 201)],
         [_starred_segment(i, pr_time_s=100 + i) for i in range(201, 251)],
@@ -198,12 +201,20 @@ async def test_onboarding_never_exceeds_150_calls(db_session, monkeypatch):
 
     client = fake_client.instances[0]
     assert task.status == "done"
-    assert task.strava_calls_made == sync.ONBOARDING_STRAVA_CALL_BUDGET
     assert client.zone_calls == 1
-    remaining_calls = sync.ONBOARDING_STRAVA_CALL_BUDGET - 3
-    expected_kom_calls = remaining_calls // 2
+    metadata_calls = 3  # two starred pages + athlete zones
+    assert task.strava_calls_made == metadata_calls + sync.ONBOARDING_BACKFILL_CALL_BUDGET
+    expected_kom_calls = sync.ONBOARDING_BACKFILL_CALL_BUDGET // 2
     assert len(client.segment_calls) == expected_kom_calls
-    assert len(client.segment_effort_calls) == remaining_calls - expected_kom_calls
+    assert len(client.segment_effort_calls) == sync.ONBOARDING_BACKFILL_CALL_BUDGET - expected_kom_calls
+    assert client.call_order[:6] == [
+        ("segment", 1),
+        ("effort", 1),
+        ("segment", 2),
+        ("effort", 2),
+        ("segment", 3),
+        ("effort", 3),
+    ]
 
 
 @pytest.mark.asyncio

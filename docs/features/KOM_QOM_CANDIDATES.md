@@ -137,7 +137,7 @@ Poll refresh progress.
 }
 ```
 
-`status` ∈ `{ running, done, error, rate_limited }`. When `status` is `rate_limited`, `retry_after` is an ISO 8601 datetime indicating when to resume. The profile-page housekeeping UI counts down to that timestamp and disables housekeeping buttons until retry is safe.
+`status` ∈ `{ running, done, error, rate_limited }`. When `status` is `rate_limited`, `retry_after` is an ISO 8601 datetime indicating when to resume. The profile-page housekeeping UI stores that timestamp in browser storage, counts down to it across page reloads, and disables housekeeping buttons until retry is safe.
 
 ### `GET /api/kom-qom/backfill/availability`
 
@@ -309,10 +309,10 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first connect (`bootstrap_done = false`), `run_sync` uses a 150-call balanced onboarding budget: fetch starred segments, cache athlete zones if stale, seed PR/current-KOM data from `athlete_pr_effort`, infer gap `0` for current KOM/QOM holders, then split remaining calls between `GET /segments/{id}` KOM-time enrichment and `GET /segment_efforts` history import. If the KOM-time side has fewer pending segments, the unused share rolls into segment-effort backfill. If a rate-limited/bootstrap retry already has cached starred rows, it reuses them instead of fetching starred segments again.
+1. On first connect (`bootstrap_done = false`), `run_sync` fetches starred segments, caches athlete zones if stale, seeds PR/current-KOM data from `athlete_pr_effort`, infers gap `0` for current KOM/QOM holders, then interleaves up to 50 balanced calls between `GET /segments/{id}` KOM-time enrichment and `GET /segment_efforts` history import. This normally gives about 25 calls to each side; if one side has fewer pending segments, the unused share rolls into the other side. If a rate-limited/bootstrap retry already has cached starred rows, it reuses them instead of fetching starred segments again.
 2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
-4. Historical data continues through the daily backfill cron or the permissioned UI backfill button. Each chunk spends at most 10 Strava calls and splits them between KOM-time enrichment and segment-effort history; cron rotates users round-robin.
+4. Historical data continues through the daily backfill cron or the permissioned UI backfill button. Each chunk spends at most 10 Strava calls and interleaves KOM-time enrichment with segment-effort history; cron rotates users round-robin.
 5. Segment-effort backfill prioritizes gap-enriched candidates before the remaining starred segments.
 6. If a previous backfill marked a PR-seeded segment done with no imported effort rows before the latest starred sync, the segment is re-queued so older empty results can be repaired.
 

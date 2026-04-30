@@ -49,7 +49,7 @@ After each response, `rate_limiter.sync_from_headers(headers)` overwrites the lo
 
 `BudgetExhausted` is the normal exhaustion signal. If Strava still returns an actual `429`, the client syncs from the response headers and reports `rate_limited` with a retry time at the next Strava window boundary.
 
-Balanced onboarding uses a hard 150-call cap per new athlete: starred-segment pages first, athlete zones if stale, then the remaining budget is split between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. If onboarding is interrupted after starred segments were stored locally, the next bootstrap retry reuses those cached starred rows instead of spending another `GET /segments/starred` call. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
+Balanced onboarding fetches starred-segment pages first, fetches athlete zones if stale, then spends at most 50 additional calls interleaved between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. That normally means about 25 `GET /segments/{id}` calls and 25 `GET /segment_efforts` calls on first connect. If onboarding is interrupted after starred segments were stored locally, the next bootstrap retry reuses those cached starred rows instead of spending another `GET /segments/starred` call. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
 
 ### Staying safe
 
@@ -184,7 +184,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used by balanced onboarding and later KOM-time backfill, cached **7 days**. Onboarding spends about half of its post-starred/zones budget here and sends the other half to segment-effort history. Background cron/UI backfill chunks spend at most 10 calls per invocation, split between KOM-time and segment-effort work.
+Used by balanced onboarding and later KOM-time backfill, cached **7 days**. Onboarding interleaves about half of its 50-call post-starred/zones budget here and the other half to segment-effort history. Background cron/UI backfill chunks spend at most 10 calls per invocation, interleaved between KOM-time and segment-effort work.
 
 ```json
 {

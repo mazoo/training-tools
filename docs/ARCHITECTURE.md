@@ -54,7 +54,7 @@ Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` w
 2. Cache athlete zones if missing/stale (GET /athlete/zones, 7-day TTL)
    └─ store the raw zones payload in athlete_zones for power-zone difficulty tags
 
-3. Split remaining calls from the 150-call onboarding budget between:
+3. Interleave up to 50 balanced onboarding calls between:
    GET /segments/{id}
    └─ KOM-time enrichment for PR-seeded starred segments without known KOM time
    └─ order by "best chance" candidate priority (rank history if known,
@@ -158,8 +158,8 @@ On a full cold-start for an athlete with 100 starred segments:
 
 - 1 call: starred segments
 - 1 call: athlete zones
-- up to ~74 calls: KOM-time enrichment for best-chance PR-seeded candidates
-- up to ~74 calls: segment-effort history for prioritized starred segments
+- up to ~25 calls: KOM-time enrichment for best-chance PR-seeded candidates
+- up to ~25 calls: segment-effort history for prioritized starred segments
 - 0 calls: activity detail fetches during bootstrap
 
 On a typical incremental refresh with 3 new activities since last sync:
@@ -169,7 +169,7 @@ On a typical incremental refresh with 3 new activities since last sync:
 - 1 call: activity list
 - 3 calls: activity details
 
-Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. Each chunk splits its budget roughly half to missing/stale KOM-time enrichment and half to `GET /segment_efforts`; if the KOM-time side has fewer pending segments, the unused share rolls into segment-effort history. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
+Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. Each chunk interleaves roughly half its budget for missing/stale KOM-time enrichment and half for `GET /segment_efforts`; if one side has fewer pending segments, the unused share rolls into the other side. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
 
 Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 
@@ -328,7 +328,7 @@ The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It m
 - 15-min window: raises when `remaining <= 20` (out of 200)
 - Daily window: raises when `remaining <= 100` (out of 2000)
 
-Balanced onboarding has a hard 150-call cap per new athlete after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, split between KOM-time enrichment and segment-effort history.
+Balanced onboarding has a hard 50-call cap after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, interleaved between KOM-time enrichment and segment-effort history.
 
 After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth), aligns reset timers to Strava's fixed quarter-hour and UTC-midnight windows, and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 

@@ -181,9 +181,11 @@ import Layout from "../layouts/Layout.astro";
 
   const BACKFILL_FROM_UI = "backfill_from_ui";
   const STRAVA_API_TOKEN_VISIBLE = "strava_api_token_visible";
+  const RATE_LIMIT_RETRY_AT_STORAGE_PREFIX = "tt_rate_limit_retry_at";
   const debugParams = new URLSearchParams(window.location.search);
   const showStravaTokenDebug = debugParams.has("debug");
   let canRunBackfill = false;
+  let rateLimitRetryAtStorageKey = RATE_LIMIT_RETRY_AT_STORAGE_PREFIX;
   let housekeepingHideTimeoutId: number | undefined;
   let rateLimitCountdownId: number | undefined;
 
@@ -202,6 +204,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function showConnected(data: {
+    athlete_id?: number;
     firstname?: string | null;
     lastname?: string | null;
     profile?: string | null;
@@ -235,13 +238,26 @@ import Layout from "../layouts/Layout.astro";
     }
 
     canRunBackfill = data.permissions?.includes(BACKFILL_FROM_UI) ?? false;
+    if (data.athlete_id != null) {
+      rateLimitRetryAtStorageKey = `${RATE_LIMIT_RETRY_AT_STORAGE_PREFIX}:${data.athlete_id}`;
+      try {
+        const legacyRetryAt = localStorage.getItem(RATE_LIMIT_RETRY_AT_STORAGE_PREFIX);
+        if (legacyRetryAt && !localStorage.getItem(rateLimitRetryAtStorageKey)) {
+          localStorage.setItem(rateLimitRetryAtStorageKey, legacyRetryAt);
+        }
+        localStorage.removeItem(RATE_LIMIT_RETRY_AT_STORAGE_PREFIX);
+      } catch {
+        // Storage can be unavailable in private/restricted browser contexts.
+      }
+    }
     updateHousekeepingDescription();
 
     if (showStravaTokenDebug && data.permissions?.includes(STRAVA_API_TOKEN_VISIBLE)) {
       loadStravaAccessToken();
     }
 
-    if (canRunBackfill) {
+    const restoredRateLimitCountdown = restoreRateLimitCountdown();
+    if (canRunBackfill && !restoredRateLimitCountdown) {
       loadBackfillAvailability();
     }
   }
@@ -287,6 +303,7 @@ import Layout from "../layouts/Layout.astro";
     const btn = document.getElementById("btn-backfill") as HTMLButtonElement;
     btn.classList.add("hidden");
     if (!canRunBackfill) return;
+    if (getStoredRateLimitRetryAt() !== null) return;
     try {
       const res = await apiFetch("/api/kom-qom/backfill/availability");
       if (!res.ok) return;
@@ -329,7 +346,13 @@ import Layout from "../layouts/Layout.astro";
     const refreshBtn = document.getElementById("btn-refresh") as HTMLButtonElement | null;
     const backfillBtn = document.getElementById("btn-backfill") as HTMLButtonElement | null;
     if (refreshBtn) refreshBtn.disabled = disabled;
-    if (backfillBtn) backfillBtn.disabled = disabled;
+    if (backfillBtn) {
+      backfillBtn.disabled = disabled;
+      if (disabled && canRunBackfill) {
+        backfillBtn.textContent = "Run daily backfill";
+        backfillBtn.classList.remove("hidden");
+      }
+    }
   }
 
   function stopRateLimitCountdown() {
@@ -350,6 +373,51 @@ import Layout from "../layouts/Layout.astro";
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   }
 
+  function formatRetryTime(timestamp: number) {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp));
+  }
+
+  function persistRateLimitRetryAt(timestamp: number) {
+    try {
+      localStorage.setItem(rateLimitRetryAtStorageKey, String(timestamp));
+    } catch {
+      // Storage can be unavailable in private/restricted browser contexts.
+    }
+  }
+
+  function clearRateLimitRetryAt() {
+    try {
+      localStorage.removeItem(rateLimitRetryAtStorageKey);
+    } catch {
+      // Storage can be unavailable in private/restricted browser contexts.
+    }
+  }
+
+  function getStoredRateLimitRetryAt(): number | null {
+    try {
+      const raw = localStorage.getItem(rateLimitRetryAtStorageKey);
+      const retryAt = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(retryAt)) return null;
+      if (retryAt <= Date.now()) {
+        localStorage.removeItem(rateLimitRetryAtStorageKey);
+        return null;
+      }
+      return retryAt;
+    } catch {
+      return null;
+    }
+  }
+
+  function restoreRateLimitCountdown() {
+    const retryAt = getStoredRateLimitRetryAt();
+    if (retryAt === null) return false;
+    startRateLimitCountdown(new Date(retryAt).toISOString());
+    return true;
+  }
+
   function startRateLimitCountdown(retryAfter?: string | null) {
     stopRateLimitCountdown();
     const parsedRetryAt = retryAfter ? Date.parse(retryAfter) : NaN;
@@ -357,18 +425,23 @@ import Layout from "../layouts/Layout.astro";
       ? parsedRetryAt
       : Date.now() + 15 * 60 * 1000;
 
+    persistRateLimitRetryAt(retryAt);
     setHousekeepingButtonsDisabled(true);
 
     const render = () => {
       const remainingMs = retryAt - Date.now();
       if (remainingMs <= 0) {
         stopRateLimitCountdown();
+        clearRateLimitRetryAt();
         setHousekeepingButtonsDisabled(false);
         setHousekeepingStatus("Ready to retry.", "ok");
         loadBackfillAvailability();
         return false;
       }
-      setHousekeepingStatus(`Rate limited — retry in ${formatRetryCountdown(remainingMs)}.`, "error");
+      setHousekeepingStatus(
+        `Rate limited — retry at ${formatRetryTime(retryAt)} (in ${formatRetryCountdown(remainingMs)}).`,
+        "error"
+      );
       return true;
     };
 
@@ -497,6 +570,7 @@ import Layout from "../layouts/Layout.astro";
 
     const res = await apiFetch("/api/profile/disconnect", { method: "POST" });
     if (res.ok) {
+      clearRateLimitRetryAt();
       localStorage.removeItem("tt_token");
       window.location.href = "/";
     } else {
