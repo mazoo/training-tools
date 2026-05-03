@@ -109,7 +109,7 @@ async def disconnect(athlete_id: CurrentAthlete, db: DB) -> dict:
 @router.delete("/account")
 async def delete_account(athlete_id: CurrentAthlete, db: DB) -> dict:
     # Deletes all rows belonging to this athlete. SegmentEnrichment is intentionally
-    # excluded — it has no athlete_id and its data (geometry, KOM times) is shared.
+    # excluded — it has no athlete_id and its data (geometry, KOM/QOM times) is shared.
     for model in (
         AthleteToken,
         AthleteSyncState,

@@ -20,7 +20,7 @@ async def daily_backfill(
     _: None = Depends(_require_backfill_secret),
 ) -> dict:
     """
-    Advance each athlete's starred-segment effort and KOM-time backfills.
+    Advance each athlete's starred-segment effort and XOM-time backfills.
     Designed to be called once per day by a system cron job:
 
         curl -X POST http://localhost:8000/api/internal/daily-backfill \
@@ -38,7 +38,7 @@ async def reset_kom_time_checked_endpoint(
     _: None = Depends(_require_backfill_secret),
 ) -> dict:
     """
-    Re-queue all segments whose KOM time was fetched but came back null.
+    Re-queue all segments whose KOM/QOM time was fetched but came back null.
     The next backfill run will re-call GET /segments/{id} for each of them.
 
         curl -X POST http://localhost:8000/api/internal/reset-kom-time-checked \

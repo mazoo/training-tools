@@ -12,7 +12,7 @@ Strava uses OAuth 2.0. The flow:
 2. Strava redirects back with `?code=…`
 3. Backend exchanges the code for tokens: `POST https://www.strava.com/oauth/token`
 4. If `ALLOWED_ATHLETE_IDS` is set, backend rejects athletes not in that comma-separated allowlist before storing tokens.
-5. Backend stores `access_token`, `refresh_token`, `expires_at` in `athlete_tokens`.
+5. Backend stores `access_token`, `refresh_token`, `expires_at` in `athlete_tokens`, and caches the OAuth exchange's embedded athlete profile fields (`firstname`, `lastname`, `profile_medium`, `sex`) in `athlete_profile`.
 6. Before every API call, check `expires_at`; if `now + 60s > expires_at`, refresh with `refresh_token`.
 
 ### Required OAuth scopes
@@ -49,7 +49,7 @@ After each response, `rate_limiter.sync_from_headers(headers)` overwrites the lo
 
 `BudgetExhausted` is the normal exhaustion signal. If Strava still returns an actual `429`, the client syncs from the response headers and reports `rate_limited` with a retry time at the next Strava window boundary.
 
-Balanced onboarding fetches starred-segment pages first, fetches athlete zones if stale, then spends at most 50 additional calls interleaved between KOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. That normally means about 25 `GET /segments/{id}` calls and 25 `GET /segment_efforts` calls on first connect. If onboarding is interrupted after starred segments were stored locally, the next bootstrap retry reuses those cached starred rows instead of spending another `GET /segments/starred` call. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
+Balanced onboarding fetches starred-segment pages first, fetches athlete zones if stale, then spends at most 50 additional calls interleaved between sex-aware XOM-time enrichment for high-value PR-seeded segments and `GET /segment_efforts` history import. That normally means about 25 `GET /segments/{id}` calls and 25 `GET /segment_efforts` calls on first connect. If onboarding is interrupted after starred segments were stored locally, the next bootstrap retry reuses those cached starred rows instead of spending another `GET /segments/starred` call. The KOM/QOM page's browser-triggered backfill uses the same 15-minute headroom and a stricter daily threshold of 150 remaining calls before showing or starting the button. Cron/UI backfill chunks also stop once daily remaining calls drop below 150 and spend at most 10 calls per invocation.
 
 ### Staying safe
 
@@ -118,7 +118,7 @@ Important fields:
 }
 ```
 
-`athlete_pr_effort` is the primary first-load seed: it gives the athlete's known PR time/date/activity on starred segments without calling activity detail or segment-effort endpoints. When `athlete_pr_effort.is_kom` is true, the app infers `kom_time_s = pr_time_s` and gap `0` without calling `GET /segments/{id}`.
+`athlete_pr_effort` is the primary first-load seed: it gives the athlete's known PR time/date/activity on starred segments without calling activity detail or segment-effort endpoints. When `athlete_pr_effort.is_kom` is true, the app infers the current sex-specific target time from `pr_time_s` and gap `0` without calling `GET /segments/{id}` (`kom_time_s` for male/unknown athletes, `qom_time_s` for female athletes).
 
 ### Detailed activity — recent sync source of rank and watts data
 
@@ -184,7 +184,7 @@ GET /segments/{id}
 Headers: Authorization: Bearer {access_token}
 ```
 
-Used by balanced onboarding and later KOM-time backfill, cached **7 days**. Onboarding interleaves about half of its 50-call post-starred/zones budget here and the other half to segment-effort history. Background cron/UI backfill chunks spend at most 10 calls per invocation, interleaved between KOM-time and segment-effort work.
+Used by balanced onboarding and later XOM-time backfill, cached **7 days**. Onboarding interleaves about half of its 50-call post-starred/zones budget here and the other half to segment-effort history. Background cron/UI backfill chunks spend at most 10 calls per invocation, interleaved between XOM-time and segment-effort work.
 
 ```json
 {
@@ -208,9 +208,9 @@ Used by balanced onboarding and later KOM-time backfill, cached **7 days**. Onbo
 }
 ```
 
-**`xoms.kom` availability:** this field was present in earlier Strava API responses but its continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` as optional enrichment — the app works without it. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s` and update `kom_time_checked_at` so the segment is not retried until the cache expires. Note: `gap_to_kom_s` is **not stored** — it is computed at query time from imported `best_time_s` when available, otherwise from seeded `pr_time_s`.
+**`xoms.kom` / `xoms.qom` availability:** these fields were present in earlier Strava API responses but their continued availability is uncertain given Strava's API restrictions. Treat `kom_time_s` and `qom_time_s` as optional enrichment — the app works without them. If `xoms` is absent or null, store `null` in `segment_enrichment.kom_time_s` / `qom_time_s` and update the matching checked timestamps so the segment is not retried until the cache expires. Note: `gap_to_kom_s` is **not stored** — despite the legacy field name, it is computed at query time against the logged-in athlete's sex-specific target (`kom_time_s` by default, `qom_time_s` when `athlete_profile.sex = "F"`).
 
-Parsing `xoms.kom` to seconds:
+Parsing `xoms.kom` / `xoms.qom` to seconds:
 ```python
 def xom_to_seconds(s: str) -> int:
     parts = s.split(":")

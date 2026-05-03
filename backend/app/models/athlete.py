@@ -22,6 +22,7 @@ class AthleteProfile(Base):
     firstname: Mapped[str | None] = mapped_column(String, nullable=True)
     lastname: Mapped[str | None] = mapped_column(String, nullable=True)
     profile_medium: Mapped[str | None] = mapped_column(String, nullable=True)
+    sex: Mapped[str | None] = mapped_column(String, nullable=True)
     home_address: Mapped[str | None] = mapped_column(String, nullable=True)
     home_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     home_lng: Mapped[float | None] = mapped_column(Float, nullable=True)

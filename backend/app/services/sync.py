@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.athlete import AthleteToken, AthleteSyncState, AthleteZones
+from app.models.athlete import AthleteProfile, AthleteToken, AthleteSyncState, AthleteZones
 from app.models.segment import (
     AthleteSegmentProfile,
     SegmentEffortBackfillState,
@@ -17,7 +17,7 @@ from app.models.segment import (
 from app.strava.client import StravaClient, StravaRateLimitError
 from app.strava.rate_limiter import rate_limiter
 from app.tasks import TaskStatus, create_task
-from app.utils import is_segment_indoor, xom_to_seconds
+from app.utils import is_qom_sex, is_segment_indoor, xom_to_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,24 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
+async def _get_athlete_sex(db: AsyncSession, athlete_id: int) -> str | None:
+    result = await db.execute(
+        select(AthleteProfile.sex).where(AthleteProfile.athlete_id == athlete_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def _xom_time_for_sex(
+    enrichment: SegmentEnrichment | None,
+    athlete_sex: str | None,
+) -> int | None:
+    if not enrichment:
+        return None
+    if is_qom_sex(athlete_sex):
+        return enrichment.qom_time_s
+    return enrichment.kom_time_s
+
+
 # ── public entry points ────────────────────────────────────────────────────────
 
 async def run_sync(
@@ -62,7 +80,7 @@ async def run_sync(
 
     Bootstrap (first connect): fetches starred segments for free athlete PR
     metadata, then spends up to ONBOARDING_BACKFILL_CALL_BUDGET calls on
-    balanced KOM-time enrichment and segment-effort history.
+    balanced XOM-time enrichment and segment-effort history.
 
     Incremental (subsequent calls): syncs starred segments + activities newer
     than last_activity_sync_at, so today's rides appear without waiting for
@@ -78,6 +96,7 @@ async def run_sync(
         client = StravaClient(access_token)
 
         task.status = "running"
+        athlete_sex = await _get_athlete_sex(db, athlete_id)
         sync_state = await _get_sync_state(db, athlete_id)
         bootstrap_done = bool(sync_state and sync_state.bootstrap_done)
         cached_starred_ids = set() if bootstrap_done else await _get_starred_ids(db, athlete_id)
@@ -93,7 +112,7 @@ async def run_sync(
             logger.info("athlete=%d syncing starred segments", athlete_id)
             starred = await _fetch_starred_segments(client, task)
             starred_ids = {s["id"] for s in starred}
-            await _update_starred_flags(db, athlete_id, starred)
+            await _update_starred_flags(db, athlete_id, starred, athlete_sex)
         await _sync_athlete_zones_if_stale(db, client, athlete_id, task)
 
         if bootstrap_done:
@@ -173,15 +192,16 @@ async def _backfill_one_segment_kom_time(
         task.strava_calls_made += 1
         xoms = detail.get("xoms") if isinstance(detail, dict) else None
         kom_time_s = xom_to_seconds(xoms.get("kom")) if isinstance(xoms, dict) else None
-        await _mark_segment_kom_time_checked(db, segment_id, kom_time_s)
+        qom_time_s = xom_to_seconds(xoms.get("qom")) if isinstance(xoms, dict) else None
+        await _mark_segment_kom_time_checked(db, segment_id, kom_time_s, qom_time_s)
     except StravaRateLimitError:
         raise
     except Exception as exc:
         _count_failed_strava_call(task, exc)
-        logger.warning("athlete=%d failed KOM-time backfill for segment=%d", athlete_id, segment_id)
+        logger.warning("athlete=%d failed XOM-time backfill for segment=%d", athlete_id, segment_id)
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         if status_code in {400, 403, 404}:
-            await _mark_segment_kom_time_checked(db, segment_id, None)
+            await _mark_segment_kom_time_checked(db, segment_id, None, None)
 
 
 async def run_backfill_chunk(
@@ -428,7 +448,7 @@ async def _run_balanced_backfill_work(
         return
 
     if kom_segment_ids:
-        logger.info("athlete=%d KOM-time backfill: %d segments", athlete_id, len(kom_segment_ids))
+        logger.info("athlete=%d XOM-time backfill: %d segments", athlete_id, len(kom_segment_ids))
     if effort_segment_ids:
         logger.info("athlete=%d segment-effort backfill: %d segments", athlete_id, len(effort_segment_ids))
 
@@ -606,15 +626,20 @@ def _best_chance_sort_key(
     )
 
 
-def _has_kom_time(profile: AthleteSegmentProfile, enrichment: SegmentEnrichment | None) -> bool:
+def _has_kom_time(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+    athlete_sex: str | None = None,
+) -> bool:
     return bool(
-        (enrichment and enrichment.kom_time_s is not None)
+        _xom_time_for_sex(enrichment, athlete_sex) is not None
         or (profile.is_kom and profile.pr_time_s is not None)
     )
 
 
 async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
     sync_state = await _get_sync_state(db, athlete_id)
+    athlete_sex = await _get_athlete_sex(db, athlete_id)
     profiles_result = await db.execute(
         select(AthleteSegmentProfile, SegmentEnrichment)
         .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
@@ -664,7 +689,7 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
 
     pending.sort(
         key=lambda row: (
-            0 if _has_kom_time(row[0], row[1]) else 1,
+            0 if _has_kom_time(row[0], row[1], athlete_sex) else 1,
             *_best_chance_sort_key(row[0], row[1]),
         )
     )
@@ -673,6 +698,12 @@ async def _get_pending_segment_effort_backfill_ids(db: AsyncSession, athlete_id:
 
 async def _get_pending_kom_time_backfill_ids(db: AsyncSession, athlete_id: int) -> list[int]:
     stale_before = _now() - _KOM_TIME_TTL
+    athlete_sex = await _get_athlete_sex(db, athlete_id)
+    checked_col = (
+        SegmentEnrichment.qom_time_checked_at
+        if is_qom_sex(athlete_sex)
+        else SegmentEnrichment.kom_time_checked_at
+    )
     result = await db.execute(
         select(AthleteSegmentProfile, SegmentEnrichment)
         .outerjoin(SegmentEnrichment, SegmentEnrichment.segment_id == AthleteSegmentProfile.segment_id)
@@ -686,8 +717,8 @@ async def _get_pending_kom_time_backfill_ids(db: AsyncSession, athlete_id: int) 
                 AthleteSegmentProfile.times_ridden > 0,
             ),
             or_(
-                SegmentEnrichment.kom_time_checked_at.is_(None),
-                SegmentEnrichment.kom_time_checked_at < stale_before,
+                checked_col.is_(None),
+                checked_col < stale_before,
             ),
         )
     )
@@ -783,13 +814,18 @@ async def _mark_segment_effort_backfill_skipped(
 
 
 async def _mark_segment_kom_time_checked(
-    db: AsyncSession, segment_id: int, kom_time_s: int | None
+    db: AsyncSession,
+    segment_id: int,
+    kom_time_s: int | None,
+    qom_time_s: int | None,
 ) -> None:
     now = _now()
     values = {
         "segment_id": segment_id,
         "kom_time_s": kom_time_s,
         "kom_time_checked_at": now,
+        "qom_time_s": qom_time_s,
+        "qom_time_checked_at": now,
         "cached_at": now,
     }
     stmt = (
@@ -800,6 +836,8 @@ async def _mark_segment_kom_time_checked(
             set_={
                 "kom_time_s": kom_time_s,
                 "kom_time_checked_at": now,
+                "qom_time_s": qom_time_s,
+                "qom_time_checked_at": now,
                 "cached_at": now,
             },
         )
@@ -836,17 +874,32 @@ async def _upsert_sync_state(db: AsyncSession, athlete_id: int) -> None:
 
 
 async def _update_starred_flags(
-    db: AsyncSession, athlete_id: int, starred: list[dict]
+    db: AsyncSession,
+    athlete_id: int,
+    starred: list[dict],
+    athlete_sex: str | None,
 ) -> None:
     """
     Upsert starred segment data from GET /segments/starred.
 
     Segment-level fields (geometry, grade, elevation, activity_type…) go into
     segment_enrichment. Athlete-specific fields (PR, is_kom, starred_date) go
-    into athlete_segment_profile. cached_at and kom_time_s in segment_enrichment
-    are intentionally NOT updated here — those are managed by the KOM-time backfill.
+    into athlete_segment_profile. cached_at and XOM times in segment_enrichment
+    are intentionally NOT updated here except for current holders — those are
+    managed by the segment-detail backfill.
     """
     now = _now()
+    current_xom_time_fields = (
+        {
+            "qom_time_s": None,
+            "qom_time_checked_at": None,
+        }
+        if is_qom_sex(athlete_sex)
+        else {
+            "kom_time_s": None,
+            "kom_time_checked_at": None,
+        }
+    )
     for seg in starred:
         seg_id = seg["id"]
         name = seg.get("name", "")
@@ -885,7 +938,7 @@ async def _update_starred_flags(
 
         start_lat, start_lng = _latlng(seg.get("start_latlng"))
         end_lat, end_lng = _latlng(seg.get("end_latlng"))
-        # Only update geometry/metadata fields — preserve cached_at and kom_time_s.
+        # Only update geometry/metadata fields — preserve cached_at and XOM times.
         enrichment_update = {
             "segment_name": name,
             "distance_m": seg.get("distance"),
@@ -906,21 +959,29 @@ async def _update_starred_flags(
         }
         enrichment_values = {
             "segment_id": seg_id,
-            "kom_time_s": pr_time_s if is_kom and pr_time_s else None,
-            "kom_time_checked_at": now if is_kom and pr_time_s else None,
             "cached_at": now,
             **enrichment_update,
+            **current_xom_time_fields,
         }
         enrichment_conflict_update = dict(enrichment_update)
         if is_kom and pr_time_s:
             # If the athlete currently owns the KOM/QOM, their PR is the
-            # current XOM time, so gap-to-KOM is known without a detail call.
-            enrichment_conflict_update.update(
+            # current XOM time, so the gap is known without a detail call.
+            xom_time_update = (
                 {
+                    "qom_time_s": pr_time_s,
+                    "qom_time_checked_at": now,
+                }
+                if is_qom_sex(athlete_sex)
+                else {
                     "kom_time_s": pr_time_s,
                     "kom_time_checked_at": now,
                 }
             )
+            enrichment_conflict_update.update(
+                xom_time_update
+            )
+            enrichment_values.update(xom_time_update)
         await db.execute(
             sqlite_insert(SegmentEnrichment)
             .values(**enrichment_values)
@@ -1165,20 +1226,29 @@ async def _recompute_profile(
 
 async def reset_kom_time_checked(db: AsyncSession) -> int:
     """
-    Clear kom_time_checked_at for all enriched segments where kom_time_s is still
-    null. This re-queues them for the next backfill run so the KOM-time fetch is
-    retried (useful when Strava previously returned a segment without xoms but now
-    has the data available).
+    Clear XOM checked timestamps for enriched segments where a cached KOM or QOM
+    time is still null. This re-queues them for the next backfill run so the
+    segment-detail fetch is retried (useful when Strava previously returned a
+    segment without xoms but now has the data available).
 
     Returns the number of rows reset.
     """
     result = await db.execute(
         update(SegmentEnrichment)
         .where(
-            SegmentEnrichment.kom_time_s.is_(None),
-            SegmentEnrichment.kom_time_checked_at.is_not(None),
+            or_(
+                SegmentEnrichment.kom_time_s.is_(None),
+                SegmentEnrichment.qom_time_s.is_(None),
+            ),
+            or_(
+                SegmentEnrichment.kom_time_checked_at.is_not(None),
+                SegmentEnrichment.qom_time_checked_at.is_not(None),
+            ),
         )
-        .values(kom_time_checked_at=None)
+        .values(
+            kom_time_checked_at=None,
+            qom_time_checked_at=None,
+        )
     )
     await db.commit()
     return result.rowcount

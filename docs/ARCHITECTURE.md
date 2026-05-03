@@ -33,9 +33,9 @@ Recent/manual sync imports efforts from `GET /activities/{id}?include_all_effort
 
 **Layer 2 — Segment enrichment (optional)**
 
-Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. Starred segments also provide athlete-specific PR metadata via `athlete_pr_effort`, which seeds first-load candidates before full effort history is imported. `kom_time_s` (from `xoms.kom`) is populated by balanced onboarding and by backfill via `GET /segments/{id}`. If `athlete_pr_effort.is_kom = true`, `kom_time_s` is inferred from `pr_time_s` without a detail call. `kom_time_checked_at` records attempts even when `xoms.kom` is absent, so missing optional data does not get retried every run.
+Geometry (`start_latlng`, `avg_grade_pct`), city/country, elevation, and `activity_type` come free from `GET /athlete/segments/starred` and are stored in `segment_enrichment` on every sync. Starred segments also provide athlete-specific PR metadata via `athlete_pr_effort`, which seeds first-load candidates before full effort history is imported. `kom_time_s` and `qom_time_s` (from `xoms.kom` / `xoms.qom`) are populated by balanced onboarding and by backfill via `GET /segments/{id}`. If `athlete_pr_effort.is_kom = true`, the logged-in athlete's sex-specific target time is inferred from `pr_time_s` without a detail call. The checked timestamps record attempts even when `xoms` data is absent, so missing optional data does not get retried every run.
 
-`gap_to_kom_s` is **not stored** — it is computed at query time from the imported best effort time when available, otherwise from the starred PR time. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
+`gap_to_kom_s` is **not stored** — it is computed at query time from the imported best effort time when available, otherwise from the starred PR time. Despite the legacy field name, female athletes (`athlete_profile.sex = "F"`) use `qom_time_s`; everyone else uses `kom_time_s`. This avoids a stale derived column and lets home-distance calculation (also query-time) stay consistent.
 
 **Layer 3 — Athlete zones (optional)**
 
@@ -49,20 +49,20 @@ Athlete zones come from `GET /athlete/zones` and are cached in `athlete_zones` w
 1. Sync starred segments  (GET /athlete/segments/starred, paginated)
    └─ upsert geometry/grade/elevation/activity_type into segment_enrichment
       upsert is_kom/pr_time_s/starred_date into athlete_segment_profile
-      infer kom_time_s = pr_time_s for current KOM/QOM holders
+      infer the sex-specific target time from pr_time_s for current KOM/QOM holders
 
 2. Cache athlete zones if missing/stale (GET /athlete/zones, 7-day TTL)
    └─ store the raw zones payload in athlete_zones for power-zone difficulty tags
 
 3. Interleave up to 50 balanced onboarding calls between:
    GET /segments/{id}
-   └─ KOM-time enrichment for PR-seeded starred segments without known KOM time
+   └─ XOM-time enrichment for PR-seeded starred segments without known KOM/QOM time
    └─ order by "best chance" candidate priority (rank history if known,
       outdoor rides, realistic duration/grade, recent PR/star date, segment id)
 
    GET /segment_efforts
    └─ effort-history import for prioritized starred segments
-   └─ unused KOM-time share rolls into segment-effort backfill
+   └─ unused XOM-time share rolls into segment-effort backfill
 
 4. Set bootstrap_done = true, last_activity_sync_at = now
 
@@ -93,10 +93,10 @@ retry reuses those cached starred rows instead of spending another
 ### Historical backfill
 
 ```
-1. Use about half the chunk budget for KOM-time enrichment:
+1. Use about half the chunk budget for XOM-time enrichment:
    GET /segments/{id}
-   └─ parse xoms.kom into segment_enrichment.kom_time_s when present
-   └─ update segment_enrichment.kom_time_checked_at even when xoms.kom is absent
+   └─ parse xoms.kom/qom into segment_enrichment.kom_time_s/qom_time_s when present
+   └─ update sex-specific checked timestamps even when xoms data is absent
    └─ order: high-value candidates first, using the same best-chance priority as onboarding
 
 2. Use the remaining chunk budget for pending starred segments from local DB
@@ -125,14 +125,14 @@ GET /api/kom-qom/candidates
         │
         ├─ 2. JOIN segment_enrichment  (for grade, geometry, xoms)
         │      Compute distance_from_home_km = haversine(start_lat, start_lng, home_lat, home_lng)
-        │      Compute gap_to_kom_s from best_time_s or seeded pr_time_s
-        │      (null if kom_time_s is unknown)
+        │      Compute sex-aware gap_to_kom_s from best_time_s or seeded pr_time_s
+        │      (null if the relevant KOM/QOM time is unknown)
         │      (both are cheap calculations; neither is stored)
         │
         ├─ 3. Read athlete_zones
         │      Compute best_power_zone, estimated_kom_power_watts,
         │      estimated_kom_power_zone, and kom_difficulty when watts,
-        │      zones, and KOM time are all available
+        │      zones, and sex-specific target time are all available
         │
         ├─ 4. Apply filters
         │      effort_time_min / effort_time_max  → COALESCE(best_time_s, pr_time_s)
@@ -152,13 +152,13 @@ GET /api/kom-qom/candidates
 | Activity list | `GET /athlete/activities` | Incremental (newest-first, stop at last known) | — |
 | Activity details | `GET /activities/{id}` | Once per activity | — |
 | Starred segment efforts | `GET /segment_efforts` | Balanced onboarding; then daily/UI backfill; one broad call per starred segment in the normal case | — |
-| KOM time enrichment | `GET /segments/{id}` | Balanced onboarding; then daily/UI backfill within call budget | 7 days |
+| XOM time enrichment | `GET /segments/{id}` | Balanced onboarding; then daily/UI backfill within call budget | 7 days |
 
 On a full cold-start for an athlete with 100 starred segments:
 
 - 1 call: starred segments
 - 1 call: athlete zones
-- up to ~25 calls: KOM-time enrichment for best-chance PR-seeded candidates
+- up to ~25 calls: XOM-time enrichment for best-chance PR-seeded candidates
 - up to ~25 calls: segment-effort history for prioritized starred segments
 - 0 calls: activity detail fetches during bootstrap
 
@@ -169,7 +169,7 @@ On a typical incremental refresh with 3 new activities since last sync:
 - 1 call: activity list
 - 3 calls: activity details
 
-Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. Each chunk interleaves roughly half its budget for missing/stale KOM-time enrichment and half for `GET /segment_efforts`; if one side has fewer pending segments, the unused share rolls into the other side. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
+Historical backfill then proceeds separately. The cron path spends at most 10 Strava calls per 15-minute window across all athletes and rotates athletes round-robin. Each chunk interleaves roughly half its budget for missing/stale XOM-time enrichment and half for `GET /segment_efforts`; if one side has fewer pending segments, the unused share rolls into the other side. Dense segments that hit the `per_page=200` cap continue by page while budget remains and stay pending if the run budget is exhausted. A `done` segment with no imported efforts is retried after a newer starred sync if Strava still reports an `athlete_pr_effort` seed, which repairs older empty backfill results without reopening every completed segment.
 
 Backfill normally runs through `POST /api/internal/daily-backfill` with `BACKFILL_SECRET`. Admin users with `backfill_from_ui` can also start their own backfill chunk from the KOM/QOM page, but the button is hidden unless the current Strava budget remains above the 15-minute headroom and the stricter daily backfill threshold.
 
@@ -192,6 +192,7 @@ CREATE TABLE athlete_profile (
     firstname       TEXT,
     lastname        TEXT,
     profile_medium  TEXT,              -- Strava avatar URL (medium size)
+    sex             TEXT,              -- Strava athlete sex (M/F), cached from OAuth exchange
     home_address    TEXT,              -- set via Nominatim geocoding
     home_lat        REAL,              -- per-athlete override; null = use HOME_LAT env var
     home_lng        REAL
@@ -295,7 +296,8 @@ CREATE TABLE athlete_segment_profile (
 
 -- Segment metadata shared across athletes.
 -- Geometry/grade/elevation populated from GET /segments/starred on every sync (no TTL).
--- kom_time_s is populated by onboarding/backfill GET /segments/{id}, or inferred from pr_time_s for current KOMs.
+-- kom_time_s/qom_time_s are populated by onboarding/backfill GET /segments/{id},
+-- or inferred from pr_time_s for current KOM/QOM holders.
 -- gap_to_kom_s is NOT stored — computed at query time from best_time_s or pr_time_s.
 CREATE TABLE segment_enrichment (
     segment_id              INTEGER PRIMARY KEY,
@@ -317,6 +319,8 @@ CREATE TABLE segment_enrichment (
     hazardous               BOOLEAN,
     kom_time_s              INTEGER,        -- parsed from xoms.kom; null if unavailable
     kom_time_checked_at     DATETIME,       -- last GET /segments/{id} attempt
+    qom_time_s              INTEGER,        -- parsed from xoms.qom; null if unavailable
+    qom_time_checked_at     DATETIME,       -- last GET /segments/{id} attempt
     cached_at               DATETIME NOT NULL
 );
 ```
@@ -328,7 +332,7 @@ The rate limiter (`strava/rate_limiter.py`) is **proactive**, not reactive. It m
 - 15-min window: raises when `remaining <= 20` (out of 200)
 - Daily window: raises when `remaining <= 100` (out of 2000)
 
-Balanced onboarding has a hard 50-call cap after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, interleaved between KOM-time enrichment and segment-effort history.
+Balanced onboarding has a hard 50-call cap after starred/zones calls are counted. UI-triggered backfill uses the same 15-minute headroom and a stricter daily visibility/start threshold of 150 remaining calls. Cron and UI backfill chunks also keep that daily buffer and spend at most 10 calls per invocation, interleaved between XOM-time enrichment and segment-effort history.
 
 After each Strava response the limiter syncs its counters from `X-RateLimit-Usage` / `X-RateLimit-Limit` headers (ground truth), aligns reset timers to Strava's fixed quarter-hour and UTC-midnight windows, and persists state to `RATE_LIMIT_STATE_PATH` (`rate_limit_state.json` by default) so budget survives process restarts.
 

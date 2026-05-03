@@ -17,8 +17,8 @@ import Layout from "../layouts/Layout.astro";
         id="f-sort"
         class="shrink-0 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer"
       >
-        <option value="gap-to-kom" selected>Gap to KOM</option>
-        <option value="rank-distance">KOM / Podium / Top-10 + distance</option>
+        <option id="sort-gap-option" value="gap-to-kom" selected>Gap to KOM/QOM</option>
+        <option id="sort-rank-option" value="rank-distance">KOM/QOM / Podium / Top-10 + distance</option>
         <option value="distance">Distance from home</option>
       </select>
     </div>
@@ -210,7 +210,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function rankBadge(c: any): string {
-    if (c.is_kom) return `<span class="text-yellow-400 font-bold text-xs">★ KOM</span>`;
+    if (c.is_kom) return `<span class="text-yellow-400 font-bold text-xs">★ ${xomLabel(c)}</span>`;
     if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">🥉 Podium</span>`;
     if (c.top10_seen) return `<span class="text-gray-500 text-xs">Top 10</span>`;
     return "";
@@ -234,7 +234,7 @@ import Layout from "../layouts/Layout.astro";
       return `<span class="rounded border border-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 text-xs font-semibold text-amber-200">Realistic</span>`;
     }
     if (c.kom_difficulty === "hard") {
-      return `<span class="rounded border border-rose-500/60 bg-rose-500/10 px-1.5 py-0.5 text-xs font-semibold text-rose-300">Hard to KOM</span>`;
+      return `<span class="rounded border border-rose-500/60 bg-rose-500/10 px-1.5 py-0.5 text-xs font-semibold text-rose-300">${c.kom_difficulty_label ?? `Hard to ${xomLabel(c)}`}</span>`;
     }
     return "";
   }
@@ -256,6 +256,18 @@ import Layout from "../layouts/Layout.astro";
     return zone != null ? ` <span class="text-gray-500">(Zone ${zone})</span>` : "";
   }
 
+  function xomLabel(c?: any): string {
+    return c?.xom_label ?? currentXomLabel;
+  }
+
+  function setXomLabel(label: string | null | undefined) {
+    currentXomLabel = label === "QOM" || label === "KOM" ? label : "KOM/QOM";
+    const gapOption = document.getElementById("sort-gap-option");
+    const rankOption = document.getElementById("sort-rank-option");
+    if (gapOption) gapOption.textContent = `Gap to ${currentXomLabel}`;
+    if (rankOption) rankOption.textContent = `${currentXomLabel} / Podium / Top-10 + distance`;
+  }
+
   function card(c: any): string {
     const dist = c.distance_from_home_km != null ? `${c.distance_from_home_km} km` : "—";
     const grade = c.average_grade != null ? `${c.average_grade.toFixed(1)}%` : "—";
@@ -272,13 +284,13 @@ import Layout from "../layouts/Layout.astro";
         : "history pending";
     const gap =
       c.gap_to_kom_s != null
-        ? `Gap to KOM: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`
+        ? `Gap to ${xomLabel(c)}: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`
         : "";
     const bestWatts = c.best_avg_watts != null
       ? `<span>Best power <strong class="text-gray-200">${Math.round(c.best_avg_watts)}W</strong>${zoneLabel(c.best_power_zone)}</span>`
       : "";
     const estimatedWatts = c.estimated_kom_power_watts != null
-      ? `<span>KOM target <strong class="text-gray-200">~${Math.round(c.estimated_kom_power_watts)}W avg</strong>${zoneLabel(c.estimated_kom_power_zone)}</span>`
+      ? `<span>${xomLabel(c)} target <strong class="text-gray-200">~${Math.round(c.estimated_kom_power_watts)}W avg</strong>${zoneLabel(c.estimated_kom_power_zone)}</span>`
       : "";
     const watts = [bestWatts, estimatedWatts]
       .filter(Boolean)
@@ -386,6 +398,7 @@ import Layout from "../layouts/Layout.astro";
   // ── state ─────────────────────────────────────────────────────────────────
 
   let allCandidates: any[] = [];
+  let currentXomLabel = "KOM/QOM";
   type SortMode = "gap-to-kom" | "rank-distance" | "distance";
   let currentSort: SortMode = "gap-to-kom";
 
@@ -490,6 +503,7 @@ import Layout from "../layouts/Layout.astro";
         return;
       }
       const data = await res.json();
+      setXomLabel(data.xom_label);
       allCandidates = data.candidates ?? [];
       initSliders(allCandidates);
       hide("state-loading");

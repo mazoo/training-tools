@@ -52,7 +52,7 @@ training-tools/
 │   │   │   ├── auth.py        ← session token create/decode, access token validation + refresh
 │   │   │   ├── sync.py        ← Strava sync orchestration (starred segments, activities, segment-effort backfill)
 │   │   │   ├── permissions.py ← role/permission seeding and checks
-│   │   │   └── kom_qom.py     ← KOM/QOM candidate filtering, gap-to-KOM computation
+│   │   │   └── kom_qom.py     ← KOM/QOM candidate filtering, sex-aware gap computation
 │   │   └── strava/
 │   │       ├── client.py      ← StravaClient: OAuth exchange, athlete/activity/segment-effort API
 │   │       └── rate_limiter.py← StravaRateLimiter: token-bucket, header sync, disk persistence
@@ -104,7 +104,7 @@ npm run dev                   # runs on :4321 (Astro default), proxies /api → 
 ## Key conventions
 
 - **No direct Strava API calls outside `backend/app/strava/`**. All callers go through `StravaClient` so rate limiting is always enforced.
-- **Cache Strava responses in DB.** Segment details (including KOM time from `xoms`) are cached in `SegmentEnrichment` with a 7-day TTL. Never re-fetch if fresh data is available.
+- **Cache Strava responses in DB.** Segment details (including KOM/QOM times from `xoms`) are cached in `SegmentEnrichment` with a 7-day TTL. Never re-fetch if fresh data is available.
 - **Home location** defaults to env vars `HOME_LAT` / `HOME_LNG`. Athletes can override it per-account via `PUT /api/profile/home` (Nominatim geocoding stores result in `AthleteProfile`). Distance is Haversine via `utils.haversine_km`.
 - **Privileged UI actions are permission-gated.** Startup seeds the `admin` role plus the `backfill_from_ui` and `strava_api_token_visible` permissions; the first/single connected athlete is granted `admin`.
 - **First production is private-gated.** Set `ALLOWED_ATHLETE_IDS` in production so only approved Strava athlete IDs can complete OAuth while SQLite is the production database.

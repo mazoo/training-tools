@@ -9,7 +9,7 @@ from app.config import settings
 from app.models.athlete import AthleteProfile, AthleteZones
 from app.models.segment import AthleteSegmentProfile, SegmentEffortBackfillState, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters, CandidatesResponse, SegmentCandidate
-from app.utils import haversine_km, seconds_to_display
+from app.utils import haversine_km, seconds_to_display, xom_label_for_sex
 
 
 @dataclass(frozen=True)
@@ -63,36 +63,44 @@ def _distance_from_home(
     return round(haversine_km(home_lat, home_lng, enrichment.start_lat, enrichment.start_lng), 1)
 
 
-def _gap_to_kom(
-    profile: AthleteSegmentProfile, enrichment: SegmentEnrichment | None
-) -> tuple[int | None, float | None]:
-    kom_time_s = _known_kom_time_s(profile, enrichment)
-    known_time_s = profile.best_time_s or profile.pr_time_s
-    if not kom_time_s or not known_time_s:
-        return None, None
-    gap_s = 0 if profile.is_kom and profile.pr_time_s else known_time_s - kom_time_s
-    return gap_s, round(gap_s / kom_time_s * 100, 1)
-
-
-def _known_kom_time_s(
+def _target_time_s(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
+    xom_label: str,
 ) -> int | None:
-    if enrichment and enrichment.kom_time_s is not None:
-        return enrichment.kom_time_s
+    if enrichment:
+        if xom_label == "QOM":
+            if enrichment.qom_time_s is not None:
+                return enrichment.qom_time_s
+        elif enrichment.kom_time_s is not None:
+            return enrichment.kom_time_s
     if profile.is_kom and profile.pr_time_s is not None:
         return profile.pr_time_s
     return None
+
+
+def _gap_to_xom(
+    profile: AthleteSegmentProfile,
+    enrichment: SegmentEnrichment | None,
+    xom_label: str,
+) -> tuple[int | None, float | None]:
+    target_time_s = _target_time_s(profile, enrichment, xom_label)
+    known_time_s = profile.best_time_s or profile.pr_time_s
+    if not target_time_s or not known_time_s:
+        return None, None
+    gap_s = 0 if profile.is_kom and profile.pr_time_s else known_time_s - target_time_s
+    return gap_s, round(gap_s / target_time_s * 100, 1)
 
 
 def _data_quality(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
     backfill_state: SegmentEffortBackfillState | None,
+    xom_label: str,
 ) -> str:
     if backfill_state and backfill_state.status == "done":
         return "backfilled"
-    if _known_kom_time_s(profile, enrichment) is not None:
+    if _target_time_s(profile, enrichment, xom_label) is not None:
         return "enriched"
     if profile.times_ridden > 0:
         return "imported"
@@ -146,11 +154,11 @@ def _zone_for_power(power_watts: float | None, zones: list[_PowerZone]) -> int |
     return None
 
 
-def _difficulty_label(difficulty: str | None) -> str | None:
+def _difficulty_label(difficulty: str | None, xom_label: str) -> str | None:
     labels = {
         "easy": "Easy to get",
         "realistic": "Realistic",
-        "hard": "Hard to KOM",
+        "hard": f"Hard to {xom_label}",
     }
     return labels.get(difficulty or "")
 
@@ -159,18 +167,19 @@ def _power_difficulty(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
     zones: list[_PowerZone],
+    xom_label: str,
 ) -> _PowerDifficulty:
     best_power_zone = _zone_for_power(profile.best_avg_watts, zones)
     known_time_s = profile.best_time_s or profile.pr_time_s
-    kom_time_s = _known_kom_time_s(profile, enrichment)
-    gap_to_kom_s, gap_to_kom_pct = _gap_to_kom(profile, enrichment)
+    target_time_s = _target_time_s(profile, enrichment, xom_label)
+    gap_to_kom_s, gap_to_kom_pct = _gap_to_xom(profile, enrichment, xom_label)
 
-    if not zones or profile.best_avg_watts is None or not known_time_s or not kom_time_s:
+    if not zones or profile.best_avg_watts is None or not known_time_s or not target_time_s:
         return _PowerDifficulty(best_power_zone, None, None, None, None)
     if gap_to_kom_s is None or gap_to_kom_s <= 0 or gap_to_kom_pct is None:
         return _PowerDifficulty(best_power_zone, None, None, None, None)
 
-    estimated_power = round(profile.best_avg_watts * known_time_s / kom_time_s, 1)
+    estimated_power = round(profile.best_avg_watts * known_time_s / target_time_s, 1)
     estimated_zone = _zone_for_power(estimated_power, zones)
 
     difficulty = None
@@ -187,7 +196,7 @@ def _power_difficulty(
         estimated_kom_power_watts=estimated_power,
         estimated_kom_power_zone=estimated_zone,
         kom_difficulty=difficulty,
-        kom_difficulty_label=_difficulty_label(difficulty),
+        kom_difficulty_label=_difficulty_label(difficulty, xom_label),
     )
 
 
@@ -198,10 +207,11 @@ def _build_candidate(
     home_lat: float | None,
     home_lng: float | None,
     power_zones: list[_PowerZone],
+    xom_label: str,
 ) -> SegmentCandidate:
-    kom_time_s = _known_kom_time_s(profile, enrichment)
-    gap_to_kom_s, gap_to_kom_pct = _gap_to_kom(profile, enrichment)
-    power_difficulty = _power_difficulty(profile, enrichment, power_zones)
+    kom_time_s = _target_time_s(profile, enrichment, xom_label)
+    gap_to_kom_s, gap_to_kom_pct = _gap_to_xom(profile, enrichment, xom_label)
+    power_difficulty = _power_difficulty(profile, enrichment, power_zones, xom_label)
     seg_name = (
         (enrichment.segment_name if enrichment and enrichment.segment_name else None)
         or profile.segment_name
@@ -216,7 +226,8 @@ def _build_candidate(
         best_seen_kom_rank=profile.best_seen_kom_rank,
         last_seen_kom_rank=profile.last_seen_kom_rank,
         is_kom=profile.is_kom,
-        data_quality=_data_quality(profile, enrichment, backfill_state),
+        xom_label=xom_label,
+        data_quality=_data_quality(profile, enrichment, backfill_state, xom_label),
         best_time_s=profile.best_time_s,
         best_time_display=seconds_to_display(profile.best_time_s),
         latest_time_s=profile.latest_time_s,
@@ -265,6 +276,7 @@ async def get_candidates(
         select(AthleteProfile).where(AthleteProfile.athlete_id == athlete_id)
     )
     athlete_profile = profile_result.scalar_one_or_none()
+    xom_label = xom_label_for_sex(athlete_profile.sex if athlete_profile else None)
     home_lat = (
         athlete_profile.home_lat
         if athlete_profile and athlete_profile.home_lat is not None
@@ -306,7 +318,15 @@ async def get_candidates(
 
     result = await db.execute(stmt)
     candidates = [
-        _build_candidate(profile, enrichment, backfill_state, home_lat, home_lng, power_zones)
+        _build_candidate(
+            profile,
+            enrichment,
+            backfill_state,
+            home_lat,
+            home_lng,
+            power_zones,
+            xom_label,
+        )
         for profile, enrichment, backfill_state in result.all()
     ]
     candidates.sort(key=lambda c: (
@@ -317,6 +337,7 @@ async def get_candidates(
 
     return CandidatesResponse(
         fetched_at=datetime.now(timezone.utc),
+        xom_label=xom_label,
         total=len(candidates),
         candidates=candidates,
     )

@@ -28,6 +28,19 @@ def xom_to_seconds(s: object) -> int | None:
         return None
 
 
+def is_qom_sex(sex: str | None) -> bool:
+    return (sex or "").strip().upper() == "F"
+
+
+def xom_label_for_sex(sex: str | None) -> str:
+    normalized = (sex or "").strip().upper()
+    if normalized == "F":
+        return "QOM"
+    if normalized == "M":
+        return "KOM"
+    return "KOM/QOM"
+
+
 def seconds_to_display(s: int | None) -> str | None:
     if s is None:
         return None

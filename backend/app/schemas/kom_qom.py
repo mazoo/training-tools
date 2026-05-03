@@ -19,8 +19,10 @@ class SegmentCandidate(BaseModel):
     podium_seen: bool
     best_seen_kom_rank: int | None
     last_seen_kom_rank: int | None
-    # is_kom: athlete currently holds KOM per Strava starred response
+    # is_kom: athlete currently holds the sex-specific KOM/QOM per Strava starred response.
     is_kom: bool
+    # Sex-aware target label for display; "QOM" for female athletes, else "KOM".
+    xom_label: str
     # data_quality distinguishes PR-seeded first-load rows from imported effort history.
     data_quality: str
     best_time_s: int | None
@@ -64,6 +66,7 @@ class SegmentCandidate(BaseModel):
 
 class CandidatesResponse(BaseModel):
     fetched_at: datetime
+    xom_label: str
     total: int
     candidates: list[SegmentCandidate]
 

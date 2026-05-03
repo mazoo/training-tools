@@ -5,15 +5,13 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models.athlete import AthleteSyncState, AthleteToken
+from app.models.athlete import AthleteProfile, AthleteSyncState, AthleteToken, AthleteZones
 from app.models.segment import (
     AthleteSegmentProfile,
     SegmentEffortBackfillState,
     SegmentEffortDigest,
     SegmentEnrichment,
 )
-from app.models.athlete import AthleteSyncState, AthleteToken, AthleteZones
-from app.models.segment import AthleteSegmentProfile, SegmentEnrichment
 from app.schemas.kom_qom import CandidateFilters
 from app.services import sync
 from app.services.kom_qom import get_candidates
@@ -103,7 +101,7 @@ def _fake_client_class(pages: list[list[dict]], segment_response: dict | None = 
         async def get_segment(self, segment_id: int) -> dict:
             self.segment_calls.append(segment_id)
             self.call_order.append(("segment", segment_id))
-            return segment_response or {"xoms": {"kom": "0:50"}}
+            return segment_response or {"xoms": {"kom": "0:50", "qom": "0:55"}}
 
         async def get_segment_efforts(
             self,
@@ -237,6 +235,85 @@ async def test_current_kom_gets_zero_gap_without_detail_call(db_session, monkeyp
     assert candidate.kom_time_s == 55
     assert candidate.gap_to_kom_s == 0
     assert candidate.data_quality == "backfilled"
+
+
+@pytest.mark.asyncio
+async def test_female_athlete_uses_qom_time_for_gap(db_session, monkeypatch):
+    db_session.add(AthleteProfile(athlete_id=1, sex="F"))
+    await db_session.commit()
+
+    pages = [[_starred_segment(10, pr_time_s=65)]]
+    fake_client = _fake_client_class(
+        pages,
+        segment_response={"xoms": {"kom": "0:50", "qom": "1:00"}},
+    )
+    monkeypatch.setattr(sync, "StravaClient", fake_client)
+
+    task = TaskStatus(task_id="bootstrap")
+    await sync.run_sync(db_session, athlete_id=1, access_token="token", task=task)
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+
+    assert response.xom_label == "QOM"
+    assert candidate.xom_label == "QOM"
+    assert candidate.kom_time_s == 60
+    assert candidate.gap_to_kom_s == 5
+    assert candidate.gap_to_kom_pct == 8.3
+
+    enrichment = await db_session.get(SegmentEnrichment, 10)
+    assert enrichment is not None
+    assert enrichment.kom_time_s == 50
+    assert enrichment.qom_time_s == 60
+
+
+@pytest.mark.asyncio
+async def test_unknown_athlete_sex_uses_neutral_label_and_kom_time(db_session, monkeypatch):
+    pages = [[_starred_segment(10, pr_time_s=65)]]
+    fake_client = _fake_client_class(
+        pages,
+        segment_response={"xoms": {"kom": "0:50", "qom": "1:00"}},
+    )
+    monkeypatch.setattr(sync, "StravaClient", fake_client)
+
+    task = TaskStatus(task_id="bootstrap")
+    await sync.run_sync(db_session, athlete_id=1, access_token="token", task=task)
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+
+    assert response.xom_label == "KOM/QOM"
+    assert candidate.xom_label == "KOM/QOM"
+    assert candidate.kom_time_s == 50
+    assert candidate.gap_to_kom_s == 15
+
+
+@pytest.mark.asyncio
+async def test_current_qom_gets_zero_gap_without_detail_call(db_session, monkeypatch):
+    db_session.add(AthleteProfile(athlete_id=1, sex="F"))
+    await db_session.commit()
+
+    pages = [[_starred_segment(10, pr_time_s=55, is_kom=True)]]
+    fake_client = _fake_client_class(pages)
+    monkeypatch.setattr(sync, "StravaClient", fake_client)
+
+    task = TaskStatus(task_id="bootstrap")
+    await sync.run_sync(db_session, athlete_id=1, access_token="token", task=task)
+
+    client = fake_client.instances[0]
+    assert client.segment_calls == []
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+    assert response.xom_label == "QOM"
+    assert candidate.xom_label == "QOM"
+    assert candidate.kom_time_s == 55
+    assert candidate.gap_to_kom_s == 0
+
+    enrichment = await db_session.get(SegmentEnrichment, 10)
+    assert enrichment is not None
+    assert enrichment.kom_time_s is None
+    assert enrichment.qom_time_s == 55
 
 
 @pytest.mark.asyncio

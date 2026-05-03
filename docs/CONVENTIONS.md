@@ -120,7 +120,8 @@ Endpoints not meant for the browser go in `routers/internal.py` under `/api/inte
 
 Before writing new helpers, check `utils.py`:
 - `haversine_km(lat1, lon1, lat2, lon2)` — distance in km
-- `xom_to_seconds(s)` — parse `"MM:SS"` or `"H:MM:SS"` KOM time string
+- `xom_to_seconds(s)` — parse `"MM:SS"` or `"H:MM:SS"` KOM/QOM time string
+- `xom_label_for_sex(sex)` — return `"QOM"` for Strava sex `"F"`, `"KOM"` for `"M"`, and `"KOM/QOM"` while sex is unknown
 - `seconds_to_display(s)` — format seconds back to display string
 - `is_segment_indoor(segment_dict)` — detect virtual/indoor segments
 

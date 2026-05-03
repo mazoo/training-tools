@@ -27,6 +27,7 @@ Cached Strava profile data plus per-athlete settings.
 | `firstname` | String | |
 | `lastname` | String | |
 | `profile_medium` | String | URL to Strava avatar (medium size) |
+| `sex` | String | Strava athlete sex (`M`/`F`) from OAuth profile payload |
 | `home_address` | Text | Human-readable address (set via Nominatim geocoding) |
 | `home_lat` | Real | Per-athlete home lat override (null = use `HOME_LAT` env var) |
 | `home_lng` | Real | Per-athlete home lng override (null = use `HOME_LNG` env var) |
@@ -162,7 +163,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 | `best_seen_kom_rank` | Integer? | Best ever KOM rank observed |
 | `last_seen_kom_rank` | Integer? | Most recent KOM rank |
 | `last_ridden_at` | DateTime? | |
-| `is_kom` | Boolean | Athlete currently holds KOM per starred response (`athlete_pr_effort.is_kom`) |
+| `is_kom` | Boolean | Athlete currently holds the sex-specific KOM/QOM per starred response (`athlete_pr_effort.is_kom`) |
 | `pr_time_s` | Integer? | Strava's authoritative all-time PR (may predate our sync window) |
 | `pr_activity_id` | BigInteger? | Activity containing the PR |
 | `pr_date` | DateTime? | Date the PR was set |
@@ -173,7 +174,7 @@ One row per (athlete, segment) pair. Aggregated performance profile, recomputed 
 
 ## `segment_enrichment` — `SegmentEnrichment` (`models/segment.py`)
 
-Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` is populated during balanced onboarding and later backfill from `GET /segments/{id}`; for current KOM/QOM holders it is inferred from starred `athlete_pr_effort.pr_time_s` without a detail call. `gap_to_kom_s` is **not stored** — computed at query time.
+Segment metadata shared across athletes. Geometry/grade/elevation fields come from `GET /segments/starred` on every sync (no TTL). `kom_time_s` and `qom_time_s` are populated during balanced onboarding and later backfill from `GET /segments/{id}`; for current KOM/QOM holders the logged-in athlete's sex-specific target is inferred from starred `athlete_pr_effort.pr_time_s` without a detail call. `gap_to_kom_s` is **not stored** — despite the legacy field name, it is computed at query time against `kom_time_s` by default and `qom_time_s` when `athlete_profile.sex = "F"`.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -196,6 +197,8 @@ Segment metadata shared across athletes. Geometry/grade/elevation fields come fr
 | `hazardous` | Boolean? | Strava-flagged dangerous segment |
 | `kom_time_s` | Integer? | KOM time in seconds; null when `xoms.kom` is unavailable |
 | `kom_time_checked_at` | DateTime? | Last `GET /segments/{id}` attempt; lets null KOM times be cached |
+| `qom_time_s` | Integer? | QOM time in seconds; null when `xoms.qom` is unavailable |
+| `qom_time_checked_at` | DateTime? | Last `GET /segments/{id}` attempt; lets null QOM times be cached |
 | `cached_at` | DateTime | Timestamp of last enrichment write |
 
 ---
@@ -215,6 +218,7 @@ erDiagram
         string firstname
         string lastname
         string profile_medium
+        string sex
         text home_address
         float home_lat
         float home_lng
@@ -305,6 +309,8 @@ erDiagram
         boolean hazardous
         int kom_time_s
         datetime kom_time_checked_at
+        int qom_time_s
+        datetime qom_time_checked_at
         datetime cached_at
     }
 
@@ -320,4 +326,4 @@ erDiagram
     AthleteSegmentProfile }o--|| SegmentEnrichment  : "segment_id"
 ```
 
-`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and KOM time needed for gap calculation. `AthleteZones` provides cached power zones for difficulty tags. `SegmentEnrichment` rows are shared across athletes; KOM-time checks and athlete zones are refreshed after 7 days.
+`AthleteSegmentProfile` is the primary read model for the KOM/QOM candidates feature. `SegmentEnrichment` provides the grade, distance, and sex-specific KOM/QOM time needed for gap calculation. `AthleteZones` provides cached power zones for difficulty tags. `SegmentEnrichment` rows are shared across athletes; XOM-time checks and athlete zones are refreshed after 7 days.

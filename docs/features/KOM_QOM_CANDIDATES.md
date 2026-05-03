@@ -32,6 +32,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 ```json
 {
   "fetched_at": "2025-07-14T10:00:00Z",
+  "xom_label": "KOM",
   "total": 12,
   "candidates": [
     {
@@ -42,6 +43,7 @@ Show the athlete a list of their starred Strava segments where they have histori
       "best_seen_kom_rank": 2,
       "last_seen_kom_rank": 3,
       "is_kom": false,
+      "xom_label": "KOM",
       "data_quality": "backfilled",
       "best_time_s": 847,
       "best_time_display": "14:07",
@@ -84,14 +86,15 @@ Show the athlete a list of their starred Strava segments where they have histori
 ```
 
 Notes:
-- `data_quality` is one of `seeded`, `enriched`, `imported`, or `backfilled`. `seeded` means the candidate came from starred PR metadata before segment efforts were imported; `enriched` means gap-to-KOM is known; `backfilled` means the segment-effort backfill is done for that segment.
-- `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if `xoms` enrichment is unavailable.
-- `gap_to_kom_pct` is `(known_time_s - kom_time_s) / kom_time_s * 100`, where `known_time_s` is imported `best_time_s` when available and seeded `pr_time_s` otherwise.
-- `is_kom` reflects Strava's `athlete_pr_effort.is_kom` from the starred segment response — true if the athlete currently holds the KOM.
+- `xom_label` is `QOM` for female athletes (`athlete_profile.sex = "F"`), `KOM` for male athletes (`"M"`), and `KOM/QOM` while sex is unknown. The existing `kom_time_s`, `gap_to_kom_s`, and `estimated_kom_*` response field names are legacy names; their values are computed against the sex-specific target selected by `xom_label` (`KOM` while sex is unknown).
+- `data_quality` is one of `seeded`, `enriched`, `imported`, or `backfilled`. `seeded` means the candidate came from starred PR metadata before segment efforts were imported; `enriched` means gap-to-KOM/QOM is known; `backfilled` means the segment-effort backfill is done for that segment.
+- `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if sex-specific `xoms` enrichment is unavailable.
+- `gap_to_kom_pct` is `(known_time_s - target_time_s) / target_time_s * 100`, where `known_time_s` is imported `best_time_s` when available and seeded `pr_time_s` otherwise.
+- `is_kom` reflects Strava's `athlete_pr_effort.is_kom` from the starred segment response — true if the athlete currently holds the sex-specific KOM/QOM.
 - `pr_time_s` is Strava's authoritative all-time PR for the athlete; may differ from `best_time_s` if history predates our sync window.
 - `pr_time_s`, `pr_date`, `starred_date` may be `null` for segments starred before the first sync or with no recorded PR.
 - `best_avg_watts` / `latest_avg_watts` may be `null` for athletes without a power meter.
-- `best_power_zone`, `estimated_kom_power_watts`, `estimated_kom_power_zone`, `kom_difficulty`, and `kom_difficulty_label` may be `null` until `GET /athlete/zones` has been cached, or when watts / KOM-time data is missing.
+- `best_power_zone`, `estimated_kom_power_watts`, `estimated_kom_power_zone`, `kom_difficulty`, and `kom_difficulty_label` may be `null` until `GET /athlete/zones` has been cached, or when watts / target-time data is missing.
 - `kom_difficulty` is one of `easy`, `realistic`, or `hard`. The UI labels `easy` as "Easy to get".
 - `elevation_high`, `elevation_low`, `state`, `activity_type`, `hazardous` may be `null` for non-starred segments without enrichment.
 - `distance_from_home_km` may be `null` if `HOME_LAT`/`HOME_LNG` are not configured or `start_latlng` is absent.
@@ -181,12 +184,12 @@ Layout:
 ├──────────────────────┬──────────────────────────────────────┤
 │  FILTERS             │  [ Search segment name…            ] │
 │                      ├──────────────────────────────────────┤
-│  KOM/QOM included ●  │  SEGMENT LIST (KOMs first, then dist)│
+│  KOM/QOM included ●  │  SEGMENT LIST (XOMs first, then dist)│
 │  Rides only       ●  │                                      │
 │                      │  Col de la Croix              3.2km │
 │  Effort time         │      Best 14:07 · Last 15:01         │
 │  [   ] – [   ] min   │      Rank: #2 seen · 328W · 7×      │
-│                      │      Gap to KOM: 0:27 ·  +7.8%      │
+│                      │      Gap to KOM/QOM: 0:27 · +7.8%   │
 │  Gradient            │                                      │
 │  [   ] – [   ] %     │  Kleine Scheidegg             5.1km │
 │                      │      ...                            │
@@ -201,16 +204,16 @@ Layout:
 The search box and sort dropdown are rendered side-by-side above the candidate list (not in the sidebar). Filtering and sorting are client-side — no extra API call on change.
 
 **Sort options (dropdown, top-right of list):**
-- **Gap to KOM** (default): flat sort by `gap_to_kom_s` ASC — current KOM holders (0 s gap) first, then closest to KOM, segments without KOM time data last (nulls last).
-- **KOM / Podium / Top-10 + distance**: groups by rank tier (KOM → Podium → Top-10), then sorts by `distance_from_home_km` ASC within each tier (nulls last).
+- **Gap to KOM/QOM** (default): flat sort by `gap_to_kom_s` ASC — current KOM/QOM holders (0 s gap) first, then closest to the sex-specific target, segments without target-time data last (nulls last).
+- **KOM/QOM / Podium / Top-10 + distance**: groups by rank tier (KOM/QOM → Podium → Top-10), then sorts by `distance_from_home_km` ASC within each tier (nulls last).
 - **Distance from home**: flat sort by `distance_from_home_km` ASC regardless of rank (nulls last).
 
 Each segment card shows:
-- Rank badge: KOM crown if `is_kom` (currently holds KOM), podium if `podium_seen`, top-10 if `top10_seen`; no badge if none apply
+- Rank badge: KOM/QOM crown if `is_kom` (currently holds the sex-specific target), podium if `podium_seen`, top-10 if `top10_seen`; no badge if none apply
 - Segment name + `View on Strava` link
 - Distance from home (km)
-- Best time vs latest time; Strava PR (`pr_time_s`) if available; gap to KOM and `gap_to_kom_pct` (if available)
-- Best power and estimated KOM target average power (if available), including cached power-zone labels
+- Best time vs latest time; Strava PR (`pr_time_s`) if available; gap to KOM/QOM and `gap_to_kom_pct` (if available)
+- Best power and estimated KOM/QOM target average power (if available), including cached power-zone labels
 - Difficulty badge and card tint when the power-zone estimate is available: easy candidates use a green treatment, realistic candidates amber, hard candidates red
 - Times ridden + last ridden date
 - Average grade + total distance + elevation gain (`elevation_high - elevation_low`)
@@ -256,16 +259,19 @@ profile.best_avg_watts = MAX(avg_watts) WHERE segment_id = x AND athlete_id = y 
 
 Latest values come from the effort with the most recent `effort_date`.
 
-### Gap to KOM (enrichment, may be null)
+### Gap to KOM/QOM (enrichment, may be null)
 
 ```python
-# If xoms.kom is present in GET /segments/{id} response
+# GET /segments/{id} response is cached in shared segment_enrichment.
 kom_time_s = xom_to_seconds(segment["xoms"]["kom"])
+qom_time_s = xom_to_seconds(segment["xoms"]["qom"])
+
+target_time_s = qom_time_s if athlete_profile.sex == "F" else kom_time_s
 known_time_s = profile.best_time_s or profile.pr_time_s
-gap_to_kom_s = known_time_s - kom_time_s
+gap_to_kom_s = known_time_s - target_time_s
 ```
 
-If `athlete_pr_effort.is_kom = true` from the starred segment response, the app stores `kom_time_s = pr_time_s` and returns gap `0` without calling `GET /segments/{id}`. If `xoms` is absent, `segment_enrichment.kom_time_s` is stored as `null`, `kom_time_checked_at` is updated, and the frontend omits the gap row on the card.
+If `athlete_pr_effort.is_kom = true` from the starred segment response, the app stores the logged-in athlete's sex-specific target time (`kom_time_s` or `qom_time_s`) as `pr_time_s` and returns gap `0` without calling `GET /segments/{id}`. If `xoms` is absent, `segment_enrichment.kom_time_s` / `qom_time_s` are stored as `null`, checked timestamps are updated, and the frontend omits the gap row on the card when the relevant target is unknown.
 
 ### Power-zone difficulty
 
@@ -273,16 +279,17 @@ If `athlete_pr_effort.is_kom = true` from the starred segment response, the app 
 
 ```python
 known_time_s = profile.best_time_s or profile.pr_time_s
-estimated_kom_power_watts = profile.best_avg_watts * known_time_s / kom_time_s
+target_time_s = qom_time_s if athlete_profile.sex == "F" else kom_time_s
+estimated_kom_power_watts = profile.best_avg_watts * known_time_s / target_time_s
 estimated_kom_power_zone = zone_for_power(estimated_kom_power_watts, athlete_power_zones)
 ```
 
-Difficulty is assigned only when athlete power zones, `best_avg_watts`, known effort time, and `kom_time_s` are all available:
+Difficulty is assigned only when athlete power zones, `best_avg_watts`, known effort time, and the sex-specific target time are all available:
 
 | Difficulty | Rule |
 |------------|------|
-| `easy` | Estimated KOM power is zone 4 or lower and `gap_to_kom_pct <= 5` |
-| `realistic` | Estimated KOM power is zone 5 or lower and `gap_to_kom_pct <= 15` |
+| `easy` | Estimated target power is zone 4 or lower and `gap_to_kom_pct <= 5` |
+| `realistic` | Estimated target power is zone 5 or lower and `gap_to_kom_pct <= 15` |
 | `hard` | Any harder estimate with available inputs |
 
 ### Distance from home (Haversine)
@@ -309,10 +316,10 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 
 ## Refresh strategy
 
-1. On first connect (`bootstrap_done = false`), `run_sync` fetches starred segments, caches athlete zones if stale, seeds PR/current-KOM data from `athlete_pr_effort`, infers gap `0` for current KOM/QOM holders, then interleaves up to 50 balanced calls between `GET /segments/{id}` KOM-time enrichment and `GET /segment_efforts` history import. This normally gives about 25 calls to each side; if one side has fewer pending segments, the unused share rolls into the other side. If a rate-limited/bootstrap retry already has cached starred rows, it reuses them instead of fetching starred segments again.
+1. On first connect (`bootstrap_done = false`), `run_sync` fetches starred segments, caches athlete zones if stale, seeds PR/current-KOM/QOM data from `athlete_pr_effort`, infers gap `0` for current KOM/QOM holders, then interleaves up to 50 balanced calls between `GET /segments/{id}` XOM-time enrichment and `GET /segment_efforts` history import. This normally gives about 25 calls to each side; if one side has fewer pending segments, the unused share rolls into the other side. If a rate-limited/bootstrap retry already has cached starred rows, it reuses them instead of fetching starred segments again.
 2. Subsequent "Refresh data" clicks fetch starred segments + activities newer than `last_activity_sync_at`, so today's rides appear immediately without waiting for the next backfill.
 3. The frontend polls `/api/kom-qom/refresh/{task_id}` every 3 s and shows a progress bar.
-4. Historical data continues through the daily backfill cron or the permissioned UI backfill button. Each chunk spends at most 10 Strava calls and interleaves KOM-time enrichment with segment-effort history; cron rotates users round-robin.
+4. Historical data continues through the daily backfill cron or the permissioned UI backfill button. Each chunk spends at most 10 Strava calls and interleaves XOM-time enrichment with segment-effort history; cron rotates users round-robin.
 5. Segment-effort backfill prioritizes gap-enriched candidates before the remaining starred segments.
 6. If a previous backfill marked a PR-seeded segment done with no imported effort rows before the latest starred sync, the segment is re-queued so older empty results can be repaired.
 
@@ -323,7 +330,7 @@ Computed at query time using `start_lat`/`start_lng` from `segment_enrichment` a
 | `kom_rank` null on all efforts for a segment | `top10_seen = false`; segment can still appear if ridden, without top-10/podium rank history |
 | Athlete has efforts but no power meter | `best_avg_watts = null`; card omits watts row |
 | Athlete zones not cached yet | difficulty fields are `null`; card uses default styling until the next successful sync |
-| `kom_time_s` null (no enrichment source) | gap row omitted from card |
+| Sex-specific target time null (no enrichment source) | gap row omitted from card |
 | Backfill done but no efforts imported | Card shows `history unavailable`; if the empty `done` state predates the latest starred sync and the segment still has `athlete_pr_effort`, the next backfill re-tries it |
 | Segment deleted from Strava | 404 from `GET /segment_efforts` → skipped, retain profile from effort history |
 | `start_latlng` null | `distance_from_home_km = null`; sort these last |

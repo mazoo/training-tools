@@ -20,6 +20,15 @@ SCOPES = "read,activity:read,profile:read_all"
 _CALLBACK_PATH = urlparse(settings.strava_redirect_uri).path
 
 
+def _athlete_profile_values(athlete: dict) -> dict:
+    return {
+        "firstname": athlete.get("firstname"),
+        "lastname": athlete.get("lastname"),
+        "profile_medium": athlete.get("profile_medium"),
+        "sex": athlete.get("sex"),
+    }
+
+
 def _allowed_athlete_ids() -> set[int]:
     allowed_ids: set[int] = set()
     for raw_id in settings.allowed_athlete_ids.split(","):
@@ -92,21 +101,16 @@ async def callback(
     # Athlete profile is included in the token exchange response — store it
     # here so /api/auth/me never needs a separate Strava API call.
     athlete = token_data.get("athlete", {})
+    profile_values = _athlete_profile_values(athlete)
     await db.execute(
         sqlite_insert(AthleteProfile)
         .values(
             athlete_id=athlete_id,
-            firstname=athlete.get("firstname"),
-            lastname=athlete.get("lastname"),
-            profile_medium=athlete.get("profile_medium"),
+            **profile_values,
         )
         .on_conflict_do_update(
             index_elements=["athlete_id"],
-            set_={
-                "firstname": athlete.get("firstname"),
-                "lastname": athlete.get("lastname"),
-                "profile_medium": athlete.get("profile_medium"),
-            },
+            set_=profile_values,
         )
     )
 
@@ -133,6 +137,7 @@ async def me(
             "firstname": profile.firstname,
             "lastname": profile.lastname,
             "profile": profile.profile_medium,
+            "sex": profile.sex,
             "home_address": profile.home_address,
             "home_lat": profile.home_lat,
             "home_lng": profile.home_lng,
@@ -151,21 +156,16 @@ async def me(
             status_code=429,
             detail={"strava_error": "Rate limit reached", "retry_after_s": exc.retry_after_s},
         )
+    profile_values = _athlete_profile_values(athlete)
     await db.execute(
         sqlite_insert(AthleteProfile)
         .values(
             athlete_id=athlete_id,
-            firstname=athlete.get("firstname"),
-            lastname=athlete.get("lastname"),
-            profile_medium=athlete.get("profile_medium"),
+            **profile_values,
         )
         .on_conflict_do_update(
             index_elements=["athlete_id"],
-            set_={
-                "firstname": athlete.get("firstname"),
-                "lastname": athlete.get("lastname"),
-                "profile_medium": athlete.get("profile_medium"),
-            },
+            set_=profile_values,
         )
     )
     await db.commit()
@@ -175,6 +175,7 @@ async def me(
         "firstname": athlete.get("firstname"),
         "lastname": athlete.get("lastname"),
         "profile": athlete.get("profile_medium"),
+        "sex": athlete.get("sex"),
         "home_address": None,
         "home_lat": None,
         "home_lng": None,
