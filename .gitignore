@@ -28,4 +28,3 @@ dist/
 
 # OS
 .DS_Store
-backend/rate_limit_state.json

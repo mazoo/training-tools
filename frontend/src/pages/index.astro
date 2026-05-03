@@ -3,40 +3,648 @@ import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="Home">
-  <div class="max-w-2xl mx-auto px-6 py-16 text-center">
-    <h1 class="text-3xl font-bold text-white mb-4">Training Tools</h1>
-    <p class="text-gray-400 mb-10">Personal cycling analytics. Powered by Strava.</p>
-
-    <div class="grid gap-4">
-      <a
-        href="/kom-qom"
-        class="block bg-gray-900 border border-gray-800 rounded-xl p-6 text-left hover:border-gray-600 transition-colors"
-      >
-        <div class="flex items-center gap-3 mb-2">
-          <span class="text-2xl">🏆</span>
-          <h2 class="text-lg font-semibold text-white">KOM / QOM Candidates</h2>
-        </div>
-        <p class="text-gray-400 text-sm">
-          Starred segments where you've historically been in the top 10 or on the podium.
-          Sorted by distance from home.
-        </p>
-      </a>
+  <div class="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+    <div class="max-w-3xl">
+      <h1 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+        Training Tools
+      </h1>
+      <p class="mt-4 max-w-2xl text-base leading-7 text-gray-400">
+        Personal cycling analytics for turning your Strava history into practical training targets.
+      </p>
     </div>
 
-    <div id="auth-prompt" class="hidden mt-12 text-gray-500 text-sm">
-      <p class="mb-3">Connect your Strava account to get started.</p>
-      <a
-        href="/auth/login"
-        class="inline-block bg-sky-500 text-white px-5 py-2 rounded-lg font-medium hover:bg-sky-400 transition-colors"
-      >
-        Connect Strava
-      </a>
+    <section
+      aria-labelledby="kom-qom-info-title"
+      class="mt-10 rounded-lg border border-gray-800 bg-gray-900 p-5 sm:p-6"
+    >
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
+        <div>
+          <div class="mb-3 flex items-center gap-3">
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200"
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 21h8" />
+                <path d="M12 17v4" />
+                <path d="M7 4h10v4a5 5 0 0 1-10 0V4Z" />
+                <path d="M17 5h3v1a4 4 0 0 1-4 4" />
+                <path d="M7 5H4v1a4 4 0 0 0 4 4" />
+              </svg>
+            </span>
+            <h2 id="kom-qom-info-title" class="text-xl font-semibold text-white">KOM / QOM Candidates</h2>
+          </div>
+          <p class="max-w-3xl text-sm leading-6 text-gray-400">
+            Find realistic KOM/QOM attempts among the starred segments you already care about. Starred segments are
+            the recommended base for the shortlist: see what is already yours, which podium or top-10 efforts are
+            close, and how each target fits your next ride by distance, gradient, surface, effort time, and power demand.
+          </p>
+          <div class="mt-5 flex flex-wrap gap-2 text-xs font-medium">
+            <span class="rounded border border-emerald-500/50 bg-emerald-500/10 px-2 py-1 text-emerald-300">Easy to get</span>
+            <span class="rounded border border-amber-500/60 bg-amber-500/10 px-2 py-1 text-amber-200">Realistic</span>
+            <span class="rounded border border-rose-500/50 bg-rose-500/10 px-2 py-1 text-rose-300">Hard</span>
+            <span class="rounded border border-gray-700 bg-gray-950 px-2 py-1 text-gray-300">Rides and runs</span>
+          </div>
+        </div>
+        <div class="space-y-3 text-sm text-gray-400">
+          <div class="flex items-center justify-between gap-4 border-b border-gray-800 pb-3">
+            <span>Best signal</span>
+            <span class="font-medium text-gray-200">Top 10 / podium history</span>
+          </div>
+          <div class="flex items-center justify-between gap-4 border-b border-gray-800 pb-3">
+            <span>Sort by</span>
+            <span class="font-medium text-gray-200">Gap or distance</span>
+          </div>
+          <div class="flex items-center justify-between gap-4">
+            <span>Made for</span>
+            <span class="font-medium text-gray-200">Private planning</span>
+          </div>
+          <div class="space-y-2 pt-2">
+            <button
+              type="button"
+              data-tour-open
+              class="inline-flex h-10 w-full items-center justify-center rounded-lg bg-sky-500 px-3 text-sm font-semibold text-white transition-colors hover:bg-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2 focus:ring-offset-gray-900"
+            >
+              Preview tour
+            </button>
+            <a
+              id="open-candidates-link"
+              href="/kom-qom"
+              class="hidden h-9 w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-950 px-3 text-sm font-semibold text-gray-200 transition-colors hover:border-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+            >
+              Open candidates
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="auth-prompt" class="hidden mt-4 rounded-lg border border-gray-800 bg-gray-900 p-5">
+      <div class="sm:flex sm:items-center sm:justify-between sm:gap-6">
+        <div>
+          <p class="text-sm font-semibold text-white">Connect Strava to start.</p>
+          <p class="mt-2 text-sm leading-6 text-gray-400">
+            See a private shortlist of KOM/QOM opportunities shaped around your own rides and runs.
+          </p>
+        </div>
+        <a
+          href="/auth/login"
+          class="mt-4 inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-950 px-4 text-sm font-medium text-gray-200 transition-colors hover:border-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900 sm:mt-0 sm:w-auto sm:shrink-0"
+        >
+          Connect Strava
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div
+    id="preview-tour-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-950/75 px-4 py-6 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="preview-tour-title"
+  >
+    <div class="flex max-h-[calc(100dvh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-gray-600 bg-gray-900 shadow-2xl">
+      <div class="flex items-start justify-between gap-4 border-b border-gray-700 px-5 py-4">
+        <div>
+          <p id="tour-step-label" class="text-xs font-semibold uppercase tracking-wider text-sky-300">Preview tour</p>
+          <h2 id="preview-tour-title" class="mt-1 text-xl font-semibold text-white">KOM / QOM Candidates preview</h2>
+        </div>
+        <button
+          id="preview-tour-close"
+          type="button"
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-600 bg-gray-800 text-gray-200 transition-colors hover:border-gray-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-400"
+          aria-label="Close preview tour"
+        >
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M6 6l12 12" />
+            <path d="M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[0.9fr_1.1fr]">
+        <div class="border-b border-gray-700 bg-gray-900 px-5 py-5 lg:border-b-0 lg:border-r">
+          <p id="tour-body" class="text-sm leading-6 text-gray-300"></p>
+          <div id="tour-highlights" class="mt-5 space-y-3"></div>
+        </div>
+        <div id="tour-preview" class="bg-gray-800 px-5 py-5"></div>
+      </div>
+
+      <div class="flex flex-col gap-3 border-t border-gray-700 bg-gray-900 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div id="tour-dots" class="flex gap-2" aria-label="Preview examples"></div>
+        <div class="flex gap-2">
+          <button
+            id="tour-prev"
+            type="button"
+            class="inline-flex h-9 items-center rounded-lg border border-gray-600 bg-gray-800 px-3 text-sm font-medium text-gray-200 transition-colors hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-gray-400"
+          >
+            Back
+          </button>
+          <button
+            id="tour-next"
+            type="button"
+            class="inline-flex h-9 items-center rounded-lg bg-sky-500 px-4 text-sm font-semibold text-white transition-colors hover:bg-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-300"
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </Layout>
 
 <script>
-  if (!localStorage.getItem("tt_token")) {
+  if (localStorage.getItem("tt_token")) {
+    document.getElementById("open-candidates-link")?.classList.remove("hidden");
+    document.getElementById("open-candidates-link")?.classList.add("inline-flex");
+  } else {
     document.getElementById("auth-prompt")?.classList.remove("hidden");
   }
+
+  const previewXomLabel = "KOM";
+
+  function rankBadge(c: any): string {
+    if (c.is_kom) return `<span class="text-yellow-400 font-bold text-xs">&#9733; ${xomLabel(c)}</span>`;
+    if (c.podium_seen) return `<span class="text-sky-400 font-bold text-xs">&#129353; Podium</span>`;
+    if (c.top10_seen) return `<span class="text-gray-500 text-xs">Top 10</span>`;
+    return "";
+  }
+
+  function qualityBadge(c: any): string {
+    if (c.data_quality === "seeded") {
+      return `<span class="text-gray-500 text-xs">PR seeded</span>`;
+    }
+    if (c.data_quality === "enriched") {
+      return `<span class="text-gray-500 text-xs">Gap enriched</span>`;
+    }
+    return "";
+  }
+
+  function difficultyBadge(c: any): string {
+    if (c.kom_difficulty === "easy") {
+      return `<span class="rounded border border-emerald-500/60 bg-emerald-500/10 px-1.5 py-0.5 text-xs font-semibold text-emerald-300">Easy to get</span>`;
+    }
+    if (c.kom_difficulty === "realistic") {
+      return `<span class="rounded border border-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 text-xs font-semibold text-amber-200">Realistic</span>`;
+    }
+    if (c.kom_difficulty === "hard") {
+      return `<span class="rounded border border-rose-500/60 bg-rose-500/10 px-1.5 py-0.5 text-xs font-semibold text-rose-300">${c.kom_difficulty_label ?? `Hard to ${xomLabel(c)}`}</span>`;
+    }
+    return "";
+  }
+
+  function cardTheme(c: any): string {
+    if (c.kom_difficulty === "easy") {
+      return "bg-emerald-950/30 border-emerald-500/70 hover:border-emerald-400";
+    }
+    if (c.kom_difficulty === "realistic") {
+      return "bg-amber-950/25 border-amber-500/65 hover:border-amber-400";
+    }
+    if (c.kom_difficulty === "hard") {
+      return "bg-rose-950/20 border-rose-800/70 hover:border-rose-600";
+    }
+    return "bg-gray-900 border-gray-800 hover:border-gray-700";
+  }
+
+  function zoneLabel(zone: number | null | undefined): string {
+    return zone != null ? ` <span class="text-gray-500">(Zone ${zone})</span>` : "";
+  }
+
+  function xomLabel(c?: any): string {
+    return c?.xom_label ?? previewXomLabel;
+  }
+
+  function card(c: any): string {
+    const dist = c.distance_from_home_km != null ? `${c.distance_from_home_km} km` : "&mdash;";
+    const grade = c.average_grade != null ? `${c.average_grade.toFixed(1)}%` : "&mdash;";
+    const distSeg = c.distance_m != null ? `${(c.distance_m / 1000).toFixed(1)} km` : "&mdash;";
+    const primaryTimeLabel = c.best_time_display != null ? "Best" : c.pr_time_display != null ? "PR" : "Best";
+    const primaryTime = c.best_time_display ?? c.pr_time_display ?? "&mdash;";
+    const latestTime = c.latest_time_display != null
+      ? `<span>Last <strong class="text-gray-200">${c.latest_time_display}</strong></span>`
+      : "";
+    const ridden = c.times_ridden > 0
+      ? `${c.times_ridden}&times; ridden`
+      : c.data_quality === "backfilled"
+        ? "history unavailable"
+        : "history pending";
+    const gap =
+      c.gap_to_kom_s != null
+        ? `Gap to ${xomLabel(c)}: ${c.gap_to_kom_display} (${c.gap_to_kom_pct}%)`
+        : "";
+    const bestWatts = c.best_avg_watts != null
+      ? `<span>Best power <strong class="text-gray-200">${Math.round(c.best_avg_watts)}W</strong>${zoneLabel(c.best_power_zone)}</span>`
+      : "";
+    const estimatedWatts = c.estimated_kom_power_watts != null
+      ? `<span>${xomLabel(c)} target <strong class="text-gray-200">~${Math.round(c.estimated_kom_power_watts)}W avg</strong>${zoneLabel(c.estimated_kom_power_zone)}</span>`
+      : "";
+    const watts = [bestWatts, estimatedWatts]
+      .filter(Boolean)
+      .map((item) => `<span class="inline-flex items-center gap-1.5">${item}</span>`)
+      .join(" ");
+    const location = [c.city, c.country].filter(Boolean).join(", ");
+
+    return `
+      <div class="${cardTheme(c)} border rounded-xl p-4 transition-colors">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-center gap-2 min-w-0">
+            ${rankBadge(c)}
+            ${difficultyBadge(c)}
+            ${qualityBadge(c)}
+            <span class="text-white font-medium truncate">
+              ${c.segment_name}
+            </span>
+          </div>
+          <div class="shrink-0 text-right">
+            <span class="block text-gray-500 text-sm">${dist} from home</span>
+            <a
+              href="${c.segment_url}"
+              target="_blank"
+              rel="noopener"
+              class="text-[11px] font-semibold text-gray-400 underline decoration-gray-600 underline-offset-4 hover:text-gray-200 hover:decoration-gray-300"
+            >
+              View on Strava
+            </a>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
+          <span>${primaryTimeLabel} <strong class="text-gray-200">${primaryTime}</strong></span>
+          ${latestTime}
+          <span>${ridden}</span>
+          ${watts ? `<span class="inline-flex flex-wrap gap-x-2 gap-y-1">${watts}</span>` : ""}
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
+          <span>${grade} avg &middot; ${distSeg}</span>
+          ${gap ? `<span class="text-sky-400">${gap}</span>` : ""}
+          ${location ? `<span>${location}</span>` : ""}
+        </div>
+      </div>`;
+  }
+
+  const candidates = {
+    herrenweg: {
+      segment_id: 33869800,
+      segment_name: "Herrenweg Sprint",
+      top10_seen: true,
+      podium_seen: true,
+      best_seen_kom_rank: 1,
+      is_kom: true,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 35,
+      best_time_display: "0:35",
+      latest_time_s: 58,
+      latest_time_display: "0:58",
+      pr_time_s: 35,
+      pr_time_display: "0:35",
+      times_ridden: 99,
+      best_avg_watts: 544.3,
+      best_power_zone: 7,
+      estimated_kom_power_watts: null,
+      estimated_kom_power_zone: null,
+      kom_difficulty: null,
+      kom_difficulty_label: null,
+      kom_time_s: 35,
+      kom_time_display: "0:35",
+      gap_to_kom_s: 0,
+      gap_to_kom_display: "0:00",
+      gap_to_kom_pct: 0,
+      average_grade: -0.8,
+      distance_m: 507.2,
+      distance_from_home_km: 0.7,
+      city: "Solothurn",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/33869800",
+    },
+    steuerflucht: {
+      segment_id: 28452115,
+      segment_name: "Steuerflucht",
+      top10_seen: true,
+      podium_seen: true,
+      best_seen_kom_rank: 1,
+      is_kom: false,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 29,
+      best_time_display: "0:29",
+      latest_time_s: 57,
+      latest_time_display: "0:57",
+      pr_time_s: 29,
+      pr_time_display: "0:29",
+      times_ridden: 67,
+      best_avg_watts: 565.6,
+      best_power_zone: 7,
+      estimated_kom_power_watts: 585.8,
+      estimated_kom_power_zone: 7,
+      kom_difficulty: "hard",
+      kom_difficulty_label: "Hard to KOM",
+      kom_time_s: 28,
+      kom_time_display: "0:28",
+      gap_to_kom_s: 1,
+      gap_to_kom_display: "0:01",
+      gap_to_kom_pct: 3.6,
+      average_grade: 3.1,
+      distance_m: 306.8,
+      distance_from_home_km: 0.4,
+      city: "Solothurn",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/28452115",
+    },
+    longstreet: {
+      segment_id: 36347589,
+      segment_name: "Longstreet",
+      top10_seen: true,
+      podium_seen: true,
+      best_seen_kom_rank: 2,
+      is_kom: false,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 47,
+      best_time_display: "0:47",
+      latest_time_s: 63,
+      latest_time_display: "1:03",
+      pr_time_s: 47,
+      pr_time_display: "0:47",
+      times_ridden: 17,
+      best_avg_watts: 249.3,
+      best_power_zone: 3,
+      estimated_kom_power_watts: 254.7,
+      estimated_kom_power_zone: 3,
+      kom_difficulty: "easy",
+      kom_difficulty_label: "Easy to get",
+      kom_time_s: 46,
+      kom_time_display: "0:46",
+      gap_to_kom_s: 1,
+      gap_to_kom_display: "0:01",
+      gap_to_kom_pct: 2.2,
+      average_grade: 0.3,
+      distance_m: 514,
+      distance_from_home_km: 24.7,
+      city: "Gunzgen",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/36347589",
+    },
+    aarwangenstrasse: {
+      segment_id: 7914618,
+      segment_name: "Aarwangenstrasse Climb",
+      top10_seen: true,
+      podium_seen: false,
+      best_seen_kom_rank: 5,
+      is_kom: false,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 167,
+      best_time_display: "2:47",
+      latest_time_s: 250,
+      latest_time_display: "4:10",
+      pr_time_s: 167,
+      pr_time_display: "2:47",
+      times_ridden: 3,
+      best_avg_watts: 295.8,
+      best_power_zone: 4,
+      estimated_kom_power_watts: 308.7,
+      estimated_kom_power_zone: 4,
+      kom_difficulty: "easy",
+      kom_difficulty_label: "Easy to get",
+      kom_time_s: 160,
+      kom_time_display: "2:40",
+      gap_to_kom_s: 7,
+      gap_to_kom_display: "0:07",
+      gap_to_kom_pct: 4.4,
+      average_grade: 1.3,
+      distance_m: 1764.7,
+      distance_from_home_km: 13.4,
+      city: "Niederbipp",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/7914618",
+    },
+    weissensteinDh: {
+      segment_id: 25477781,
+      segment_name: "Weissenstein - Solothurn DH",
+      top10_seen: true,
+      podium_seen: false,
+      best_seen_kom_rank: 4,
+      is_kom: false,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 574,
+      best_time_display: "9:34",
+      latest_time_s: 815,
+      latest_time_display: "13:35",
+      pr_time_s: 574,
+      pr_time_display: "9:34",
+      times_ridden: 28,
+      best_avg_watts: 133.9,
+      best_power_zone: 1,
+      estimated_kom_power_watts: 136.3,
+      estimated_kom_power_zone: 1,
+      kom_difficulty: "easy",
+      kom_difficulty_label: "Easy to get",
+      kom_time_s: 564,
+      kom_time_display: "9:24",
+      gap_to_kom_s: 10,
+      gap_to_kom_display: "0:10",
+      gap_to_kom_pct: 1.8,
+      average_grade: -9.7,
+      distance_m: 8366.1,
+      distance_from_home_km: 4.8,
+      city: "Oberdorf",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/25477781",
+    },
+    climber: {
+      segment_id: 25099560,
+      segment_name: "Climber",
+      top10_seen: true,
+      podium_seen: true,
+      best_seen_kom_rank: 1,
+      is_kom: false,
+      xom_label: "KOM",
+      data_quality: "backfilled",
+      best_time_s: 178,
+      best_time_display: "2:58",
+      latest_time_s: 274,
+      latest_time_display: "4:34",
+      pr_time_s: 178,
+      pr_time_display: "2:58",
+      times_ridden: 65,
+      best_avg_watts: 388.2,
+      best_power_zone: 6,
+      estimated_kom_power_watts: 423.9,
+      estimated_kom_power_zone: 6,
+      kom_difficulty: "hard",
+      kom_difficulty_label: "Hard to KOM",
+      kom_time_s: 163,
+      kom_time_display: "2:43",
+      gap_to_kom_s: 15,
+      gap_to_kom_display: "0:15",
+      gap_to_kom_pct: 9.2,
+      average_grade: 3.5,
+      distance_m: 1445.2,
+      distance_from_home_km: 4.2,
+      city: "Hubersdorf",
+      country: "Switzerland",
+      segment_url: "https://www.strava.com/segments/25099560",
+    },
+  };
+
+  const tourSteps = [
+    {
+      title: "KOMs on the shortlist",
+      body: "Example results with the gap sort active. Current crowns stay in the list, so the shortlist also shows what is already protected.",
+      filters: "Sort by Gap to KOM, showing current KOMs first.",
+      highlights: [
+        "Current crowns stay visible alongside future attempts.",
+        "Best time, latest time, power, and location are shown in one row.",
+      ],
+      candidates: [candidates.herrenweg],
+    },
+    {
+      title: "Close podium chances",
+      body: "Example results with podium history selected and a tight gap filter. These are the near-misses a rider may want to keep close at hand.",
+      filters: "Podium only, Gap to KOM 15 seconds or less, sorted by gap.",
+      highlights: [
+        "Podium history makes near misses easier to spot.",
+        "Difficulty labels help set expectations before you ride.",
+        "Small gaps rise to the top when gap sorting is active.",
+      ],
+      candidates: [candidates.steuerflucht, candidates.longstreet],
+    },
+    {
+      title: "Easy outdoor targets",
+      body: "Example results with the easy-target filter active. This turns the page into a quick list of attempts that look realistic for the next ride.",
+      filters: "Easy to get only, Outdoor, Gap to KOM 45 seconds or less, sorted by gap.",
+      highlights: [
+        "Easy targets collect candidates that look realistic soon.",
+        "Gap, power, gradient, and distance remain visible for each candidate.",
+        "KOM target ~309W avg (Zone 4) gives a pacing check: it scales your 296W best from 2:47 to the 2:40 target time, then maps it to your power zones.",
+      ],
+      candidates: [candidates.longstreet, candidates.aarwangenstrasse, candidates.weissensteinDh],
+    },
+    {
+      title: "Short climb focus",
+      body: "Example results with effort time narrowed to short climb attempts. The same card layout still shows rank history, gap, power target, gradient, and distance.",
+      filters: "Podium only, Outdoor, Effort time 2 to 4 minutes, sorted by gap.",
+      highlights: [
+        "Effort time keeps the list focused on a specific type of attempt.",
+        "Podium history shows where you have already been close.",
+        "The preview stays focused on candidate results, not account actions.",
+      ],
+      candidates: [candidates.climber],
+    },
+  ];
+
+  function renderPreview(step: any): string {
+    return `
+      <div class="space-y-3">
+        <div class="flex flex-col gap-1 text-xs text-gray-300 sm:flex-row sm:items-center sm:justify-between">
+          <span>${step.filters}</span>
+          <span>${step.candidates.length} candidate${step.candidates.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="space-y-3">
+          ${step.candidates.map(card).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  const modal = document.getElementById("preview-tour-modal");
+  const closeButton = document.getElementById("preview-tour-close");
+  const prevButton = document.getElementById("tour-prev") as HTMLButtonElement | null;
+  const nextButton = document.getElementById("tour-next") as HTMLButtonElement | null;
+  const titleEl = document.getElementById("preview-tour-title");
+  const labelEl = document.getElementById("tour-step-label");
+  const bodyEl = document.getElementById("tour-body");
+  const highlightsEl = document.getElementById("tour-highlights");
+  const previewEl = document.getElementById("tour-preview");
+  const dotsEl = document.getElementById("tour-dots");
+  let currentTourStep = 0;
+  let lastFocusedElement: Element | null = null;
+
+  function renderTourStep() {
+    const step = tourSteps[currentTourStep];
+    if (!step) return;
+
+    if (titleEl) titleEl.textContent = step.title;
+    if (labelEl) labelEl.textContent = `Example ${currentTourStep + 1} of ${tourSteps.length}`;
+    if (bodyEl) bodyEl.textContent = step.body;
+    if (highlightsEl) {
+      highlightsEl.innerHTML = step.highlights.map((highlight) => `
+        <div class="flex gap-3 text-sm text-gray-100">
+          <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-sky-400"></span>
+          <span>${highlight}</span>
+        </div>
+      `).join("");
+    }
+    if (previewEl) previewEl.innerHTML = renderPreview(step);
+    if (prevButton) prevButton.disabled = currentTourStep === 0;
+    if (nextButton) nextButton.textContent = currentTourStep === tourSteps.length - 1 ? "Finish" : "Next";
+    if (dotsEl) {
+      dotsEl.innerHTML = tourSteps.map((tourStep, index) => `
+        <button
+          type="button"
+          data-tour-step="${index}"
+          class="h-2.5 w-2.5 rounded-full transition-colors ${index === currentTourStep ? "bg-sky-400" : "bg-gray-600 hover:bg-gray-400"}"
+          aria-label="Show ${tourStep.title}"
+          aria-current="${index === currentTourStep ? "step" : "false"}"
+        ></button>
+      `).join("");
+      dotsEl.querySelectorAll("[data-tour-step]").forEach((button) => {
+        button.addEventListener("click", () => {
+          currentTourStep = Number((button as HTMLElement).dataset.tourStep);
+          renderTourStep();
+        });
+      });
+    }
+  }
+
+  function openTour() {
+    if (!modal) return;
+    lastFocusedElement = document.activeElement;
+    renderTourStep();
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    document.body.style.overflow = "hidden";
+    closeButton?.focus();
+  }
+
+  function closeTour() {
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+    document.body.style.overflow = "";
+    if (lastFocusedElement instanceof HTMLElement) {
+      lastFocusedElement.focus();
+    }
+  }
+
+  document.querySelectorAll("[data-tour-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      currentTourStep = 0;
+      openTour();
+    });
+  });
+
+  closeButton?.addEventListener("click", closeTour);
+  modal?.addEventListener("click", (event) => {
+    if (event.target === modal) closeTour();
+  });
+  prevButton?.addEventListener("click", () => {
+    currentTourStep = Math.max(0, currentTourStep - 1);
+    renderTourStep();
+  });
+  nextButton?.addEventListener("click", () => {
+    if (currentTourStep === tourSteps.length - 1) {
+      closeTour();
+      return;
+    }
+    currentTourStep += 1;
+    renderTourStep();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && modal && !modal.classList.contains("hidden")) {
+      closeTour();
+    }
+  });
 </script>
