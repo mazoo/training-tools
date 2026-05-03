@@ -3,102 +3,143 @@ import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="KOM / QOM Candidates">
-  <div class="px-4 sm:px-6 lg:px-8 py-5 max-w-5xl mx-auto space-y-4">
+  <div class="px-4 sm:px-6 lg:px-8 pb-5 max-w-5xl mx-auto space-y-4">
 
-    <!-- Search + Sort -->
-    <div class="flex gap-3 items-center">
-      <input
-        id="f-search"
-        type="search"
-        placeholder="Search segment name…"
-        class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-      />
-      <select
-        id="f-sort"
-        class="shrink-0 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer"
-      >
-        <option id="sort-gap-option" value="gap-to-kom" selected>Gap to KOM/QOM</option>
-        <option id="sort-rank-option" value="rank-distance">KOM/QOM / Podium / Top-10 + distance</option>
-        <option value="distance">Distance from home</option>
-      </select>
-    </div>
+    <!-- Sticky controls -->
+    <div class="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 bg-gray-950/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
+      <div class="mx-auto max-w-5xl space-y-3">
+        <!-- Search + Sort -->
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            id="f-search"
+            type="search"
+            placeholder="Search segment name…"
+            class="min-w-0 flex-1 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+          />
+          <select
+            id="f-sort"
+            class="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-gray-600 cursor-pointer sm:w-auto sm:shrink-0"
+          >
+            <option id="sort-gap-option" value="gap-to-kom" selected>Gap to KOM/QOM</option>
+            <option id="sort-rank-option" value="rank-distance">KOM/QOM / Podium / Top-10 + distance</option>
+            <option value="distance">Distance from home</option>
+          </select>
+        </div>
 
-    <!-- Filter panel -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <button
+            id="filter-panel-toggle"
+            type="button"
+            aria-controls="filter-panel"
+            aria-expanded="true"
+            class="inline-flex h-8 items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-3 font-medium text-gray-200 transition-colors hover:border-gray-600 hover:text-white focus:outline-none focus:border-gray-500"
+          >
+            <span id="filter-toggle-label">Hide filters</span>
+            <span id="active-filter-count" class="hidden rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-sky-300"></span>
+          </button>
+          <span id="filter-summary" class="min-w-0 flex-1 truncate text-gray-500">Loading filters…</span>
+          <span id="candidate-count" class="shrink-0 text-gray-400">Loading candidates…</span>
+        </div>
 
-      <!-- Row 1: toggles + surface + action buttons -->
-      <div class="flex flex-wrap gap-x-5 gap-y-3 items-center">
+        <!-- Filter panel -->
+        <div id="filter-panel" class="max-h-[calc(100dvh-9.5rem)] overflow-y-auto bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
 
-        <label class="flex items-center gap-2 cursor-pointer">
-          <span class="relative inline-flex items-center">
-            <input id="f-kom-included" type="checkbox" class="sr-only peer" />
-            <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
-            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
-          </span>
-          <span class="text-sm text-gray-300">KOM/QOM included</span>
-        </label>
+          <!-- Row 1: toggles + surface + action buttons -->
+          <div class="flex flex-wrap gap-x-5 gap-y-3 items-center">
 
-        <label class="flex items-center gap-2 cursor-pointer">
-          <span class="relative inline-flex items-center">
-            <input id="f-rides-only" type="checkbox" class="sr-only peer" checked />
-            <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
-            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
-          </span>
-          <span class="text-sm text-gray-300">Rides only</span>
-        </label>
-
-        <div class="hidden sm:block w-px h-4 bg-gray-700 shrink-0"></div>
-
-        <!-- Surface radios inline -->
-        <div class="flex items-center gap-3">
-          {["all", "outdoor", "indoor"].map((val) => (
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="radio"
-                name="surface"
-                value={val}
-                checked={val === "all"}
-                class="accent-sky-500"
-              />
-              <span class="text-sm text-gray-300 capitalize">{val}</span>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="relative inline-flex items-center">
+                <input id="f-kom-included" type="checkbox" class="sr-only peer" />
+                <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+              </span>
+              <span class="text-sm text-gray-300">KOM/QOM included</span>
             </label>
-          ))}
-        </div>
 
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="relative inline-flex items-center">
+                <input id="f-rides-only" type="checkbox" class="sr-only peer" checked />
+                <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+              </span>
+              <span class="text-sm text-gray-300">Rides only</span>
+            </label>
 
-      </div>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="relative inline-flex items-center">
+                <input id="f-easy-only" type="checkbox" class="sr-only peer" />
+                <span class="w-9 h-5 bg-gray-700 peer-checked:bg-sky-600 rounded-full transition-colors"></span>
+                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></span>
+              </span>
+              <span class="text-sm text-gray-300">Easy to get only</span>
+            </label>
 
-      <!-- Row 2: dual sliders in a 2-col grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+            <div class="hidden sm:block w-px h-4 bg-gray-700 shrink-0"></div>
 
-        <div>
-          <div class="flex justify-between items-baseline mb-3">
-            <p class="text-xs text-gray-500 uppercase tracking-wider">Effort time</p>
-            <span id="time-range-label" class="text-xs text-gray-400">—</span>
-          </div>
-          <div class="dual-range-wrap">
-            <div class="dual-range-track">
-              <div class="dual-range-fill" id="time-fill"></div>
+            <!-- Surface radios inline -->
+            <div class="flex items-center gap-3">
+              {["all", "outdoor", "indoor"].map((val) => (
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="surface"
+                    value={val}
+                    checked={val === "all"}
+                    class="accent-sky-500"
+                  />
+                  <span class="text-sm text-gray-300 capitalize">{val}</span>
+                </label>
+              ))}
             </div>
-            <input id="f-time-min" type="range" step="1" class="dual-range" />
-            <input id="f-time-max" type="range" step="1" class="dual-range" />
-          </div>
-        </div>
 
-        <div>
-          <div class="flex justify-between items-baseline mb-3">
-            <p class="text-xs text-gray-500 uppercase tracking-wider">Avg gradient</p>
-            <span id="grad-range-label" class="text-xs text-gray-400">—</span>
           </div>
-          <div class="dual-range-wrap">
-            <div class="dual-range-track">
-              <div class="dual-range-fill" id="grad-fill"></div>
+
+          <!-- Row 2: sliders -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4">
+
+            <div>
+              <div class="flex justify-between items-baseline mb-3">
+                <p class="text-xs text-gray-500 uppercase tracking-wider">Effort time</p>
+                <span id="time-range-label" class="text-xs text-gray-400">—</span>
+              </div>
+              <div class="dual-range-wrap">
+                <div class="dual-range-track">
+                  <div class="dual-range-fill" id="time-fill"></div>
+                </div>
+                <input id="f-time-min" type="range" step="1" class="dual-range" />
+                <input id="f-time-max" type="range" step="1" class="dual-range" />
+              </div>
             </div>
-            <input id="f-grad-min" type="range" step="0.5" class="dual-range" />
-            <input id="f-grad-max" type="range" step="0.5" class="dual-range" />
+
+            <div>
+              <div class="flex justify-between items-baseline mb-3">
+                <p class="text-xs text-gray-500 uppercase tracking-wider">Avg gradient</p>
+                <span id="grad-range-label" class="text-xs text-gray-400">—</span>
+              </div>
+              <div class="dual-range-wrap">
+                <div class="dual-range-track">
+                  <div class="dual-range-fill" id="grad-fill"></div>
+                </div>
+                <input id="f-grad-min" type="range" step="0.5" class="dual-range" />
+                <input id="f-grad-max" type="range" step="0.5" class="dual-range" />
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between items-baseline mb-3">
+                <p id="gap-slider-title" class="text-xs text-gray-500 uppercase tracking-wider">Gap to KOM/QOM</p>
+                <span id="gap-value-label" class="text-xs text-gray-400">—</span>
+              </div>
+              <div class="single-range-wrap">
+                <div class="single-range-track">
+                  <div class="single-range-fill" id="gap-fill"></div>
+                </div>
+                <input id="f-gap-max" type="range" step="1" class="single-range" />
+              </div>
+            </div>
+
           </div>
         </div>
-
       </div>
     </div>
 
@@ -189,6 +230,72 @@ import Layout from "../layouts/Layout.astro";
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   }
+  .single-range-wrap {
+    position: relative;
+    height: 20px;
+    display: flex;
+    align-items: center;
+  }
+  .single-range-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #374151;
+    border-radius: 9999px;
+  }
+  .single-range-fill {
+    position: absolute;
+    height: 100%;
+    background: #0284c7;
+    border-radius: 9999px;
+    left: 0%;
+    right: 0%;
+  }
+  .single-range {
+    position: absolute;
+    width: 100%;
+    height: 20px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  .single-range::-webkit-slider-runnable-track {
+    background: transparent;
+    height: 4px;
+  }
+  .single-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    background: #ffffff;
+    border: 2px solid #0284c7;
+    cursor: pointer;
+    margin-top: -8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
+  .single-range:focus::-webkit-slider-thumb {
+    outline: 2px solid #38bdf8;
+    outline-offset: 1px;
+  }
+  .single-range::-moz-range-track {
+    background: transparent;
+    height: 4px;
+  }
+  .single-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    background: #ffffff;
+    border: 2px solid #0284c7;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  }
 </style>
 
 <script>
@@ -264,8 +371,10 @@ import Layout from "../layouts/Layout.astro";
     currentXomLabel = label === "QOM" || label === "KOM" ? label : "KOM/QOM";
     const gapOption = document.getElementById("sort-gap-option");
     const rankOption = document.getElementById("sort-rank-option");
+    const gapSliderTitle = document.getElementById("gap-slider-title");
     if (gapOption) gapOption.textContent = `Gap to ${currentXomLabel}`;
     if (rankOption) rankOption.textContent = `${currentXomLabel} / Podium / Top-10 + distance`;
+    if (gapSliderTitle) gapSliderTitle.textContent = `Gap to ${currentXomLabel}`;
   }
 
   function card(c: any): string {
@@ -341,6 +450,7 @@ import Layout from "../layouts/Layout.astro";
   let timeAbsMax = 120;
   let gradAbsMin = 0;
   let gradAbsMax = 20;
+  let gapAbsMax = 3600;
 
   function updateFill(fillId: string, minEl: HTMLInputElement, maxEl: HTMLInputElement) {
     const fill = document.getElementById(fillId)!;
@@ -351,6 +461,16 @@ import Layout from "../layouts/Layout.astro";
     const leftPct = ((Number(minEl.value) - lo) / span) * 100;
     const rightPct = ((hi - Number(maxEl.value)) / span) * 100;
     fill.style.left = `${leftPct}%`;
+    fill.style.right = `${rightPct}%`;
+  }
+
+  function updateSingleFill(fillId: string, inputEl: HTMLInputElement) {
+    const fill = document.getElementById(fillId)!;
+    const lo = Number(inputEl.min);
+    const hi = Number(inputEl.max);
+    const span = hi - lo;
+    if (span <= 0) return;
+    const rightPct = ((hi - Number(inputEl.value)) / span) * 100;
     fill.style.right = `${rightPct}%`;
   }
 
@@ -366,14 +486,21 @@ import Layout from "../layouts/Layout.astro";
     document.getElementById("grad-range-label")!.textContent = `${minV} – ${maxV}%`;
   }
 
+  function updateGapLabel() {
+    const maxV = Number((document.getElementById("f-gap-max") as HTMLInputElement).value);
+    document.getElementById("gap-value-label")!.textContent = `≤ ${Math.round(maxV)} sec`;
+  }
+
   function initSliders(candidates: any[]) {
     const times = candidates.map((c) => c.best_time_s ?? c.pr_time_s).filter((t) => t != null) as number[];
     const grades = candidates.map((c) => c.average_grade).filter((g) => g != null) as number[];
+    const gaps = candidates.map((c) => c.gap_to_kom_s).filter((g) => g != null) as number[];
 
     timeAbsMin = times.length ? Math.floor(Math.min(...times) / 60) : 0;
     timeAbsMax = times.length ? Math.ceil(Math.max(...times) / 60) : 120;
     gradAbsMin = grades.length ? Math.floor(Math.min(...grades)) : 0;
     gradAbsMax = grades.length ? Math.ceil(Math.max(...grades)) : 20;
+    gapAbsMax = gaps.length ? Math.ceil(Math.max(...gaps)) : 3600;
 
     const tMin = document.getElementById("f-time-min") as HTMLInputElement;
     const tMax = document.getElementById("f-time-max") as HTMLInputElement;
@@ -389,10 +516,17 @@ import Layout from "../layouts/Layout.astro";
     gMin.value = String(gradAbsMin);
     gMax.value = String(gradAbsMax);
 
+    const gapMax = document.getElementById("f-gap-max") as HTMLInputElement;
+    gapMax.min = "0";
+    gapMax.max = String(gapAbsMax);
+    gapMax.value = String(gapAbsMax);
+
     updateFill("time-fill", tMin, tMax);
     updateFill("grad-fill", gMin, gMax);
+    updateSingleFill("gap-fill", gapMax);
     updateTimeLabel();
     updateGradLabel();
+    updateGapLabel();
   }
 
   // ── state ─────────────────────────────────────────────────────────────────
@@ -431,21 +565,63 @@ import Layout from "../layouts/Layout.astro";
   function getFilters() {
     const komIncluded = (document.getElementById("f-kom-included") as HTMLInputElement).checked;
     const ridesOnly = (document.getElementById("f-rides-only") as HTMLInputElement).checked;
+    const easyOnly = (document.getElementById("f-easy-only") as HTMLInputElement).checked;
     const timeMinVal = Number((document.getElementById("f-time-min") as HTMLInputElement).value);
     const timeMaxVal = Number((document.getElementById("f-time-max") as HTMLInputElement).value);
     const gradMinVal = Number((document.getElementById("f-grad-min") as HTMLInputElement).value);
     const gradMaxVal = Number((document.getElementById("f-grad-max") as HTMLInputElement).value);
+    const gapMaxVal = Number((document.getElementById("f-gap-max") as HTMLInputElement).value);
     const surface = (document.querySelector('input[name="surface"]:checked') as HTMLInputElement)?.value ?? "all";
     const search = (document.getElementById("f-search") as HTMLInputElement).value.trim().toLowerCase();
-    return { komIncluded, ridesOnly, timeMinVal, timeMaxVal, gradMinVal, gradMaxVal, surface, search };
+    return { komIncluded, ridesOnly, easyOnly, timeMinVal, timeMaxVal, gradMinVal, gradMaxVal, gapMaxVal, surface, search };
+  }
+
+  function pluralize(value: number, singular: string): string {
+    return `${value} ${singular}${value === 1 ? "" : "s"}`;
+  }
+
+  function activeFilterLabels(f: ReturnType<typeof getFilters>): string[] {
+    const labels: string[] = [];
+    if (f.search) labels.push("Search");
+    if (!f.komIncluded) labels.push(`No current ${currentXomLabel}`);
+    if (f.ridesOnly) labels.push("Rides only");
+    if (f.easyOnly) labels.push("Easy");
+    if (f.surface !== "all") labels.push(f.surface === "outdoor" ? "Outdoor" : "Indoor");
+    if (f.timeMinVal > timeAbsMin || f.timeMaxVal < timeAbsMax) labels.push("Time");
+    if (f.gradMinVal > gradAbsMin || f.gradMaxVal < gradAbsMax) labels.push("Gradient");
+    if (f.gapMaxVal < gapAbsMax) labels.push(`${currentXomLabel} gap`);
+    return labels;
+  }
+
+  function updateControlSummary(f: ReturnType<typeof getFilters>, resultCount: number) {
+    const labels = activeFilterLabels(f);
+    const countEl = document.getElementById("active-filter-count");
+    const summaryEl = document.getElementById("filter-summary");
+    const candidateCountEl = document.getElementById("candidate-count");
+
+    if (countEl) {
+      countEl.textContent = String(labels.length);
+      countEl.classList.toggle("hidden", labels.length === 0);
+    }
+    if (summaryEl) {
+      summaryEl.textContent = labels.length > 0 ? labels.join(" · ") : "All candidates";
+    }
+    if (candidateCountEl) {
+      const total = allCandidates.length;
+      candidateCountEl.textContent = total > 0 && resultCount !== total
+        ? `${resultCount} of ${pluralize(total, "candidate")}`
+        : pluralize(resultCount, "candidate");
+    }
   }
 
   function applyFilters() {
     const f = getFilters();
+    const gapFilterActive = f.gapMaxVal < gapAbsMax;
     const filtered = sortCandidates(allCandidates).filter((c) => {
       if (f.search && !c.segment_name.toLowerCase().includes(f.search)) return false;
       if (!f.komIncluded && c.is_kom) return false;
       if (f.ridesOnly && c.activity_type === "Run") return false;
+      if (f.easyOnly && c.kom_difficulty !== "easy") return false;
       const knownTime = c.best_time_s ?? c.pr_time_s;
       if (knownTime != null) {
         if (f.timeMinVal > timeAbsMin && knownTime < f.timeMinVal * 60) return false;
@@ -455,10 +631,16 @@ import Layout from "../layouts/Layout.astro";
         if (f.gradMinVal > gradAbsMin && c.average_grade < f.gradMinVal) return false;
         if (f.gradMaxVal < gradAbsMax && c.average_grade > f.gradMaxVal) return false;
       }
+      if (gapFilterActive && c.gap_to_kom_s == null) return false;
+      if (c.gap_to_kom_s != null) {
+        if (f.gapMaxVal < gapAbsMax && c.gap_to_kom_s > f.gapMaxVal) return false;
+      }
       if (f.surface === "outdoor" && c.is_indoor) return false;
       if (f.surface === "indoor" && !c.is_indoor) return false;
       return true;
     });
+
+    updateControlSummary(f, filtered.length);
 
     const list = document.getElementById("candidate-list")!;
     if (filtered.length === 0) {
@@ -516,6 +698,20 @@ import Layout from "../layouts/Layout.astro";
 
   // ── wire up ───────────────────────────────────────────────────────────────
 
+  function setFilterPanelExpanded(expanded: boolean) {
+    const panel = document.getElementById("filter-panel");
+    const toggle = document.getElementById("filter-panel-toggle");
+    const label = document.getElementById("filter-toggle-label");
+    panel?.classList.toggle("hidden", !expanded);
+    toggle?.setAttribute("aria-expanded", String(expanded));
+    if (label) label.textContent = expanded ? "Hide filters" : "Filters";
+  }
+
+  document.getElementById("filter-panel-toggle")?.addEventListener("click", () => {
+    const panel = document.getElementById("filter-panel");
+    setFilterPanelExpanded(panel?.classList.contains("hidden") ?? true);
+  });
+
   document.getElementById("f-search")?.addEventListener("input", applyFilters);
   document.getElementById("f-sort")?.addEventListener("change", (e) => {
     currentSort = (e.target as HTMLSelectElement).value as SortMode;
@@ -524,6 +720,7 @@ import Layout from "../layouts/Layout.astro";
 
   document.getElementById("f-kom-included")?.addEventListener("change", applyFilters);
   document.getElementById("f-rides-only")?.addEventListener("change", applyFilters);
+  document.getElementById("f-easy-only")?.addEventListener("change", applyFilters);
   document.querySelectorAll('input[name="surface"]').forEach((el) => {
     el.addEventListener("change", applyFilters);
   });
@@ -554,6 +751,13 @@ import Layout from "../layouts/Layout.astro";
 
   wireSlider("f-time-min", "f-time-max", "time-fill", updateTimeLabel);
   wireSlider("f-grad-min", "f-grad-max", "grad-fill", updateGradLabel);
+
+  const gapMax = document.getElementById("f-gap-max") as HTMLInputElement;
+  gapMax.addEventListener("input", () => {
+    updateSingleFill("gap-fill", gapMax);
+    updateGapLabel();
+    applyFilters();
+  });
 
   loadCandidates();
 </script>

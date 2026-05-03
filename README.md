@@ -67,7 +67,7 @@ training-tools/
     ├── public/               ← static assets served from site root (favicon, logo assets)
     ├── src/
     │   ├── pages/             ← .astro files, one per tool page
-    │   ├── layouts/           ← shared Layout.astro (nav + auth state)
+    │   ├── layouts/           ← shared Layout.astro (nav, footer + auth state)
     │   └── styles/            ← global.css (Tailwind base)
     ├── astro.config.mjs
     └── package.json

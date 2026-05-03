@@ -7,7 +7,7 @@ Show the athlete a list of their starred Strava segments where they have histori
 ## User stories
 
 - As an athlete, I want to see which of my starred segments I have ever been in the top 10 or on the podium for, so I can prioritise realistic KOM/QOM targets.
-- As an athlete, I want to filter by effort time, gradient, surface, activity type (rides vs runs), and whether I already hold the KOM, so I can match segments to a specific workout goal.
+- As an athlete, I want to filter by effort time, gap to KOM/QOM, gradient, difficulty, surface, activity type (rides vs runs), and whether I already hold the KOM, so I can match segments to a specific workout goal.
 - As an athlete, I want to see how many times I've ridden a segment and what average watts I've put out, so I can gauge my current form.
 - As an athlete, I want KOM segments surfaced first, then the rest sorted by distance from home, so I can see what I already hold and plan local efforts next.
 - As an admin, I want to start the historical backfill from the page when Strava budget is safe, so I can fill missing segment-effort history without using the cron endpoint manually.
@@ -186,12 +186,15 @@ Layout:
 │                      ├──────────────────────────────────────┤
 │  KOM/QOM included ●  │  SEGMENT LIST (XOMs first, then dist)│
 │  Rides only       ●  │                                      │
+│  Easy to get only ○  │                                      │
 │                      │  Col de la Croix              3.2km │
 │  Effort time         │      Best 14:07 · Last 15:01         │
 │  [   ] – [   ] min   │      Rank: #2 seen · 328W · 7×      │
 │                      │      Gap to KOM/QOM: 0:27 · +7.8%   │
 │  Gradient            │                                      │
 │  [   ] – [   ] %     │  Kleine Scheidegg             5.1km │
+│  Gap to KOM/QOM      │                                      │
+│  [   ] sec           │                                      │
 │                      │      ...                            │
 │  Surface             │                                      │
 │  ○ All  ○ Out  ○ In  │                                      │
@@ -201,7 +204,7 @@ Layout:
 └──────────────────────┴──────────────────────────────────────┘
 ```
 
-The search box and sort dropdown are rendered side-by-side above the candidate list (not in the sidebar). Filtering and sorting are client-side — no extra API call on change.
+The search box and sort dropdown are rendered side-by-side above the candidate list (not in the sidebar). Filtering and sorting are client-side — no extra API call on change. The "Easy to get only" toggle defaults off and narrows results to `kom_difficulty = "easy"`. The gap filter is a single max-seconds slider using `gap_to_kom_s`; when narrowed, candidates without target-time gap data are excluded from the filtered result.
 
 **Sort options (dropdown, top-right of list):**
 - **Gap to KOM/QOM** (default): flat sort by `gap_to_kom_s` ASC — current KOM/QOM holders (0 s gap) first, then closest to the sex-specific target, segments without target-time data last (nulls last).
