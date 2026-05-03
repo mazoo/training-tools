@@ -19,7 +19,7 @@ class SegmentCandidate(BaseModel):
     podium_seen: bool
     best_seen_kom_rank: int | None
     last_seen_kom_rank: int | None
-    # is_kom: athlete currently holds the sex-specific KOM/QOM per Strava starred response.
+    # is_kom: athlete currently holds or is tied for the sex-specific KOM/QOM.
     is_kom: bool
     # Sex-aware target label for display; "QOM" for female athletes, else "KOM".
     xom_label: str

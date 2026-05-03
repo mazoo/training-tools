@@ -90,7 +90,7 @@ Notes:
 - `data_quality` is one of `seeded`, `enriched`, `imported`, or `backfilled`. `seeded` means the candidate came from starred PR metadata before segment efforts were imported; `enriched` means gap-to-KOM/QOM is known; `backfilled` means the segment-effort backfill is done for that segment.
 - `kom_time_s`, `gap_to_kom_s`, `gap_to_kom_pct`, and their display variants may be `null` if sex-specific `xoms` enrichment is unavailable.
 - `gap_to_kom_pct` is `(known_time_s - target_time_s) / target_time_s * 100`, where `known_time_s` is imported `best_time_s` when available and seeded `pr_time_s` otherwise.
-- `is_kom` reflects Strava's `athlete_pr_effort.is_kom` from the starred segment response — true if the athlete currently holds the sex-specific KOM/QOM.
+- `is_kom` is true when Strava's `athlete_pr_effort.is_kom` is true, or when imported/enriched data shows the athlete's known time exactly matches the sex-specific target time. The latter covers shared/tied KOM/QOM holders that Strava may not mark as sole `is_kom`.
 - `pr_time_s` is Strava's authoritative all-time PR for the athlete; may differ from `best_time_s` if history predates our sync window.
 - `pr_time_s`, `pr_date`, `starred_date` may be `null` for segments starred before the first sync or with no recorded PR.
 - `best_avg_watts` / `latest_avg_watts` may be `null` for athletes without a power meter.
@@ -274,7 +274,7 @@ known_time_s = profile.best_time_s or profile.pr_time_s
 gap_to_kom_s = known_time_s - target_time_s
 ```
 
-If `athlete_pr_effort.is_kom = true` from the starred segment response, the app stores the logged-in athlete's sex-specific target time (`kom_time_s` or `qom_time_s`) as `pr_time_s` and returns gap `0` without calling `GET /segments/{id}`. If `xoms` is absent, `segment_enrichment.kom_time_s` / `qom_time_s` are stored as `null`, checked timestamps are updated, and the frontend omits the gap row on the card when the relevant target is unknown.
+If `athlete_pr_effort.is_kom = true` from the starred segment response, the app stores the logged-in athlete's sex-specific target time (`kom_time_s` or `qom_time_s`) as `pr_time_s` and returns gap `0` without calling `GET /segments/{id}`. If the enriched target time later matches the athlete's known time even though Strava did not set `is_kom`, the candidate response still marks `is_kom = true` so tied/shared holders get KOM/QOM labeling and default UI exclusion. If `xoms` is absent, `segment_enrichment.kom_time_s` / `qom_time_s` are stored as `null`, checked timestamps are updated, and the frontend omits the gap row on the card when the relevant target is unknown.
 
 ### Power-zone difficulty
 

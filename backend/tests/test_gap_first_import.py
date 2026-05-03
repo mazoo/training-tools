@@ -238,6 +238,43 @@ async def test_current_kom_gets_zero_gap_without_detail_call(db_session, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_zero_gap_from_xom_enrichment_counts_as_current_kom(db_session):
+    now = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            AthleteSegmentProfile(
+                athlete_id=1,
+                segment_id=25452255,
+                segment_name="Niederbuchsiten bis Oensingen",
+                is_starred=True,
+                is_indoor=False,
+                times_ridden=1,
+                best_time_s=284,
+                latest_time_s=353,
+                pr_time_s=284,
+                top10_seen=True,
+                podium_seen=True,
+                is_kom=False,
+                updated_at=now,
+            ),
+            SegmentEnrichment(
+                segment_id=25452255,
+                segment_name="Niederbuchsiten bis Oensingen",
+                kom_time_s=284,
+                cached_at=now,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await get_candidates(db_session, 1, CandidateFilters())
+    candidate = response.candidates[0]
+
+    assert candidate.gap_to_kom_s == 0
+    assert candidate.is_kom is True
+
+
+@pytest.mark.asyncio
 async def test_female_athlete_uses_qom_time_for_gap(db_session, monkeypatch):
     db_session.add(AthleteProfile(athlete_id=1, sex="F"))
     await db_session.commit()

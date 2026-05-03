@@ -92,6 +92,13 @@ def _gap_to_xom(
     return gap_s, round(gap_s / target_time_s * 100, 1)
 
 
+def _is_current_xom(
+    profile: AthleteSegmentProfile,
+    gap_to_kom_s: int | None,
+) -> bool:
+    return profile.is_kom or gap_to_kom_s == 0
+
+
 def _data_quality(
     profile: AthleteSegmentProfile,
     enrichment: SegmentEnrichment | None,
@@ -225,7 +232,7 @@ def _build_candidate(
         podium_seen=profile.podium_seen,
         best_seen_kom_rank=profile.best_seen_kom_rank,
         last_seen_kom_rank=profile.last_seen_kom_rank,
-        is_kom=profile.is_kom,
+        is_kom=_is_current_xom(profile, gap_to_kom_s),
         xom_label=xom_label,
         data_quality=_data_quality(profile, enrichment, backfill_state, xom_label),
         best_time_s=profile.best_time_s,
